@@ -1,0 +1,787 @@
+{
+  "name": "Apertura",
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "mensajecliente"
+            },
+            {
+              "name": "telcliente"
+            }
+          ]
+        }
+      },
+      "id": "c055762a-8fe7-4141-a639-df2372f30060",
+      "typeVersion": 1.1,
+      "name": "When Executed by Another Workflow",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "position": [
+        272,
+        352
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "value": "0t36vVhccIEaLAYr",
+          "mode": "list",
+          "cachedResultName": "Pedidos",
+          "cachedResultUrl": "/projects/jBEOe5DECmoA4IC9/datatables/0t36vVhccIEaLAYr"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "Telefono",
+              "keyValue": "={{ $json.telcliente }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        592,
+        352
+      ],
+      "id": "ee35aa34-7160-4078-b647-112d22bd956c",
+      "name": "Get row(s)"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.limit",
+      "typeVersion": 1,
+      "position": [
+        976,
+        352
+      ],
+      "id": "b7a6b1f6-52ea-4f89-b07b-3812c12d1bf5",
+      "name": "Limit"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "136cbd32-65f4-471a-8b47-00dedaa06445",
+              "leftValue": "={{ $('Get row(s)').item.json.fase }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "empty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1280,
+        480
+      ],
+      "id": "11d1001b-cb60-4b27-8974-4c6b021daff7",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=### INSTRUCCIÓN:\nActúa como un gestor de estado de pedidos. Tu tarea es ACTUALIZAR la información del pedido combinando lo que ya sabíamos en el historial de chat con este NUEVO mensaje.\n\n### ÚLTIMO MENSAJE DEL CLIENTE:\n\"{{ $('When Executed by Another Workflow').item.json.mensajecliente }}\"\n\nGenera el JSON actualizado:",
+        "hasOutputParser": true,
+        "options": {
+          "systemMessage": "Eres un asistente experto en validación y gestión de pedidos para un restaurante.\n\n### PROTOCOLO DE MEMORIA (PRIORIDAD MÁXIMA):\n1. TU PRIMERA ACCIÓN es leer todo el historial de la conversación.\n2. NO analices el último mensaje de forma aislada. Debes INTEGRARLO con los datos anteriores.\n3. Si el usuario dice \"transferencia\", y antes dijo \"quiero una smash\", tu JSON final DEBE tener ambos datos.\n4. Si el usuario corrige un dato (ej: \"mejor con tarjeta\"), SOBREESCRIBE el valor anterior. Si no menciona un campo, MANTÉN el valor que ya tenías en el historial.\n\n### OBJETIVO:\nDevolver UN (1) objeto JSON válido que represente el ESTADO ACTUAL Y ACUMULADO del pedido.\n\n### HERRAMIENTAS Y REFERENCIAS:\n- Tabla \"Precios\": Única fuente de verdad para nombres de productos y precios.\n- Tool \"calculadora\": Para multiplicar precio * cantidad.\n\n### REGLAS DE EXTRACCIÓN Y VALIDACIÓN:\n1. **Producto:**\n   - Busca en la tabla \"Precios\" el match más probable.\n   - Ignora modificaciones de ingredientes (ej: \"sin pepino\") para el nombre del producto.\n   - Si la confianza es baja o no existe => resultado_validacion=\"error_producto\", producto=\"\" y agrega \"Producto\" a lista_faltantes.\n\n2. **Dirección / Entrega:**\n   - Palabras clave como \"paso a buscar\", \"retiro\", \"pickup\" => direccion=\"Retiro en sucursal\".\n   - Si pide envío pero no da calle/altura => direccion=\"\" y es FALTANTE.\n\n3. **Cantidades y Precios:**\n   - Si no se especifica cantidad, asume 1.\n   - Si el producto es válido, BUSCA su precio unitario en la tabla.\n   - CALCULA: total = precio_unitario * cantidad (Usa la calculadora si es necesario, pero el JSON final debe tener el número ya calculado).\n   - Si falta producto o cantidad es 0 => total=0.\n\n4. **Estado del Pedido:**\n   - \"completo\": Solo si tienes Producto (validado), Cantidad (>0), Dirección, Método de pago y Nombre.\n   - \"incompleto\": Si falta CUALQUIERA de los anteriores.\n\n### FORMATO DE SALIDA (JSON STRICT):\n- Responde SOLO con el JSON. Nada de markdown, nada de \"Aquí tienes el JSON\".\n- Tipos de datos estrictos: \"cantidad\" y \"total\" son NÚMEROS (no strings).\n- \"lista_faltantes\" debe ser un array de strings exactos: [\"Producto\", \"Cantidad\", \"Dirección de envío / Retiro en sucursal\", \"Método de pago\", \"Nombre del cliente\"].\n- Si no hay faltantes, devuelve array vacío [].\n- Si un campo de texto está vacío, usa string vacío \"\".\n\nRecuerda: Estás construyendo la base de datos del pedido en tiempo real. No olvides lo que el usuario dijo hace 2 mensajes."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        1936,
+        48
+      ],
+      "id": "5e44da75-7942-42d9-879e-e5edf617fc1e",
+      "name": "AI Agent",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "gpt-4o",
+          "mode": "list",
+          "cachedResultName": "gpt-4o"
+        },
+        "builtInTools": {},
+        "options": {
+          "temperature": 0
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        1728,
+        288
+      ],
+      "id": "30923305-e729-4682-85a4-a7a3a443decb",
+      "name": "OpenAI Chat Model",
+      "credentials": {
+        "openAiApi": {
+          "id": "NUyS17bUPZYFH4kW",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "type": "@n8n/n8n-nodes-langchain.toolCalculator",
+      "typeVersion": 1,
+      "position": [
+        2080,
+        400
+      ],
+      "id": "09166e60-fa8e-43f0-ac5a-af67a114dd55",
+      "name": "Calculator"
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "value": "tI0XVvylJpdy9qaE",
+          "mode": "list",
+          "cachedResultName": "Precios",
+          "cachedResultUrl": "/projects/jBEOe5DECmoA4IC9/datatables/tI0XVvylJpdy9qaE"
+        }
+      },
+      "type": "n8n-nodes-base.dataTableTool",
+      "typeVersion": 1.1,
+      "position": [
+        2144,
+        320
+      ],
+      "id": "81c5079c-7f2e-4fac-8273-6c20fc316525",
+      "name": "Precios"
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ $json.Telefono }}",
+        "contextWindowLength": 10
+      },
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.3,
+      "position": [
+        1808,
+        528
+      ],
+      "id": "815120a9-4f50-4e86-b7f4-263cc7a852bf",
+      "name": "Simple Memory"
+    },
+    {
+      "parameters": {
+        "schemaType": "manual",
+        "inputSchema": "{\n  \"type\": \"object\",\n  \"additionalProperties\": false,\n  \"properties\": {\n    \"resultado_validacion\": {\n      \"type\": \"string\",\n      \"enum\": [\"completo\", \"incompleto\", \"error_producto\"]\n    },\n    \"producto\": {\n      \"type\": \"string\"\n    },\n    \"cantidad\": {\n      \"type\": \"number\",\n      \"minimum\": 0\n    },\n    \"direccion\": {\n      \"type\": \"string\"\n    },\n    \"metodo_pago\": {\n      \"type\": \"string\",\n      \"enum\": [\"\", \"efectivo\", \"transferencia\", \"tarjeta\"]\n    },\n    \"nombre_cliente\": {\n      \"type\": \"string\"\n    },\n    \"lista_faltantes\": {\n      \"type\": \"array\",\n      \"items\": {\n        \"type\": \"string\",\n        \"enum\": [\n          \"Producto\",\n          \"Cantidad\",\n          \"Dirección de envío / Retiro en sucursal\",\n          \"Método de pago\",\n          \"Nombre del cliente\"\n        ]\n      }\n    },\n    \"total\": {\n      \"type\": \"number\",\n      \"minimum\": 0,\n      \"description\": \"Total calculado (precio_unitario * cantidad). Si no se puede calcular, 0.\"\n    }\n  },\n  \"required\": [\n    \"resultado_validacion\",\n    \"producto\",\n    \"cantidad\",\n    \"direccion\",\n    \"metodo_pago\",\n    \"nombre_cliente\",\n    \"lista_faltantes\",\n    \"total\"\n  ]\n}",
+        "autoFix": true
+      },
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        2304,
+        288
+      ],
+      "id": "3828e984-9d19-47f9-9ed6-135e5ff97b38",
+      "name": "Structured Output Parser",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "gpt-4o",
+          "mode": "list",
+          "cachedResultName": "gpt-4o"
+        },
+        "builtInTools": {},
+        "options": {
+          "temperature": 0
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        2256,
+        528
+      ],
+      "id": "7682e974-4153-4053-a0ea-99a129e0233e",
+      "name": "OpenAI Chat Model1",
+      "credentials": {
+        "openAiApi": {
+          "id": "NUyS17bUPZYFH4kW",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-2.5-pro",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        2416,
+        640
+      ],
+      "id": "1cd9ca0e-4b06-4c36-9c4b-372b97182f38",
+      "name": "Google Gemini Chat Model",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "flZcOJ4DO6TjbwBK",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ $json.Telefono }}",
+        "contextWindowLength": 15
+      },
+      "type": "@n8n/n8n-nodes-langchain.memoryPostgresChat",
+      "typeVersion": 1.3,
+      "position": [
+        1920,
+        352
+      ],
+      "id": "c74c9cb2-8034-427c-abd9-ace6d92133e3",
+      "name": "Postgres Chat Memory",
+      "credentials": {
+        "postgres": {
+          "id": "A7nCuN3Drkjjh6lz",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "9d598a1e-1c8c-4d69-8bd5-a952d61be95d",
+              "name": "Completo-incompleto",
+              "value": "={{ $json.output.resultado_validacion }}",
+              "type": "string"
+            },
+            {
+              "id": "846f1875-76fa-4173-b752-eeafdf92e66a",
+              "name": "pedido",
+              "value": "={{ $json.output.producto }}, {{ $json.output.cantidad }}",
+              "type": "string"
+            },
+            {
+              "id": "6d182825-998b-46e0-87fe-b4c3922b59fd",
+              "name": "direccion",
+              "value": "={{ $json.output.direccion }}",
+              "type": "string"
+            },
+            {
+              "id": "6fb56ede-fc3f-4b13-afa5-b975302781d7",
+              "name": "nombre",
+              "value": "={{ $json.output.nombre_cliente }}",
+              "type": "string"
+            },
+            {
+              "id": "c3cf18cf-c97f-4780-a5cf-f38dab1e35b8",
+              "name": "total",
+              "value": "={{ $json.output.total }}",
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        2288,
+        48
+      ],
+      "id": "9a15d3ea-aa74-41a3-b585-4c6c9ed9f882",
+      "name": "Setear varbiales"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "888c421f-d2e1-4947-bb8d-11967acbb9df",
+              "name": "output",
+              "value": "={{ $('AI Agent').item.json.output }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        2896,
+        -272
+      ],
+      "id": "9ff16524-afaa-41de-9b55-67b39f322ca2",
+      "name": "output1_no_valido"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "1e5cdcf4-6d5d-4ba4-addf-6865f9f0ffe6",
+              "leftValue": "=",
+              "rightValue": "error",
+              "operator": {
+                "type": "string",
+                "operation": "contains"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        2560,
+        -16
+      ],
+      "id": "3773dc5e-0fcb-4da7-83cf-e8ab5b849d93",
+      "name": "Pedido con error?"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "b4104f7f-2f0a-46ac-a5b0-fa35948fb76c",
+              "leftValue": "={{ $('Setear varbiales').item.json['Completo-incompleto'] }}",
+              "rightValue": "completo",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        2880,
+        -48
+      ],
+      "id": "0424b59c-de6f-42f2-bee7-1d4b7c370d64",
+      "name": "Esta completo?"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "305ff253-ef00-4ebd-b8db-bddd68fc2049",
+              "name": "output",
+              "value": "={{ $('AI Agent').item.json.output }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        3216,
+        176
+      ],
+      "id": "f67c3ae9-ce40-459a-bc02-fa271869fcc6",
+      "name": "output2_incompleto"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "dataTableId": {
+          "__rl": true,
+          "value": "0t36vVhccIEaLAYr",
+          "mode": "list",
+          "cachedResultName": "Pedidos",
+          "cachedResultUrl": "/projects/jBEOe5DECmoA4IC9/datatables/0t36vVhccIEaLAYr"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "Telefono",
+              "keyValue": "={{ $('Get row(s)').item.json.Telefono }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Direccion": "={{ $('Setear varbiales').item.json.direccion }}",
+            "Pedido": "={{ $('Setear varbiales').item.json.pedido }}",
+            "TotalPedido": "={{ $('Setear varbiales').item.json.total }}",
+            "Fase": "Apertura"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Hora",
+              "displayName": "Hora",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Fase",
+              "displayName": "Fase",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Direccion",
+              "displayName": "Direccion",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Telefono",
+              "displayName": "Telefono",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "Pedido",
+              "displayName": "Pedido",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "TotalPedido",
+              "displayName": "TotalPedido",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Despacho",
+              "displayName": "Despacho",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "Comprobante",
+              "displayName": "Comprobante",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        3168,
+        -64
+      ],
+      "id": "d71ae4da-8231-4eb6-850b-fbbe48f60137",
+      "name": "Crear pedido"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "88a1188c-59bd-4951-9365-7e8269e9b455",
+              "name": "output",
+              "value": "={{ $('AI Agent').item.json.output }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        3440,
+        -64
+      ],
+      "id": "5c5a845f-3c09-41cd-8953-28b52ff34ae4",
+      "name": "output_completo"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Get row(s)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get row(s)": {
+      "main": [
+        [
+          {
+            "node": "Limit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Limit": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calculator": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Precios": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Simple Memory": {
+      "ai_memory": [
+        []
+      ]
+    },
+    "Structured Output Parser": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Setear varbiales",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model1": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Structured Output Parser",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [
+        []
+      ]
+    },
+    "Postgres Chat Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Setear varbiales": {
+      "main": [
+        [
+          {
+            "node": "Pedido con error?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pedido con error?": {
+      "main": [
+        [
+          {
+            "node": "output1_no_valido",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Esta completo?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Esta completo?": {
+      "main": [
+        [
+          {
+            "node": "Crear pedido",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "output2_incompleto",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Crear pedido": {
+      "main": [
+        [
+          {
+            "node": "output_completo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": false
+  },
+  "versionId": "9b5c6f1a-abcb-4b32-bc4a-3c65934f748c",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "aaef63ee18d8b544de41874fa5f8030b777ca2d278dafea4eecd2da4b7649f51"
+  },
+  "id": "NnctUcgKarleWJlJ",
+  "tags": []
+}

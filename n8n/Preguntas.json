@@ -1,0 +1,167 @@
+{
+  "name": "Preguntas",
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "id": "c055762a-8fe7-4141-a639-df2372f30060",
+      "typeVersion": 1.1,
+      "name": "When Executed by Another Workflow",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "position": [
+        272,
+        352
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Consulta del usuario: \"{{ $json.query }}\"\n\nInstrucción: Busca la información necesaria en las herramientas 'tool_menu' o 'tool_faq' y devuelve el resumen de datos encontrados.",
+        "options": {
+          "systemMessage": "# ROL\nEres un Asistente de Recuperación de Información de Backend.\nTu ÚNICO objetivo es consultar las bases de datos disponibles (`tool_menu` y `tool_faq`) para encontrar la respuesta exacta a la consulta del usuario.\n\n# TUS HERRAMIENTAS\n1. **tool_menu**: Úsala cuando la consulta trate sobre comida, bebidas, precios, ingredientes, alérgenos o \"qué trae\" una hamburguesa.\n2. **tool_faq**: Úsala cuando la consulta trate sobre horarios, direcciones, zonas de delivery, tiempos de demora, métodos de pago aceptados o políticas del local.\n\n# INSTRUCCIONES DE PROCESAMIENTO\n1. Analiza la pregunta del usuario.\n2. Decide qué herramienta tiene la respuesta. Si la pregunta es compleja (ej: \"¿Cuánto sale la doble y hasta qué hora abren?\"), usa AMBAS herramientas.\n3. Ejecuta la búsqueda.\n4. Tu respuesta final debe ser SOLO UN RESUMEN TÉCNICO de los datos encontrados.\n\n# REGLAS DE RESPUESTA (IMPORTANTE)\n- NO saludes, NO seas amable, NO uses emojis.\n- NO inventes información. Si la búsqueda en la tool no devuelve nada, responde: \"DATO_NO_ENCONTRADO\".\n- Si encuentras precios, inclúyelos explícitamente.\n- Si encuentras horarios, sé específico.\n\n# FORMATO DE SALIDA DESEADO\nDebes devolver un texto plano estructurado así:\n\n[DATOS ENCONTRADOS]\n- Item: [Nombre del producto/Tema]\n- Detalle: [Descripción, ingredientes o respuesta de la FAQ]\n- Precio/Valor: [Si aplica]\n\nEjemplo de salida correcta:\n\"[DATOS ENCONTRADOS]\n- Item: Hamburguesa Doble Queso\n- Detalle: Medallón de carne 120g x2, queso cheddar, panceta.\n- Precio: $8500\n- Item: Horarios\n- Detalle: Lunes a Domingo de 19:00 a 23:00hs.\""
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        480,
+        352
+      ],
+      "id": "86c3586b-dc2b-4d37-9434-310de0f65970",
+      "name": "AI Agent"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "gpt-4o",
+          "mode": "list",
+          "cachedResultName": "gpt-4o"
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        352,
+        560
+      ],
+      "id": "a2dd4ef7-e974-4eaa-8574-4685ec52886e",
+      "name": "OpenAI Chat Model",
+      "credentials": {
+        "openAiApi": {
+          "id": "NUyS17bUPZYFH4kW",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "value": "9qFgd1Npwmhg4Rjv",
+          "mode": "list",
+          "cachedResultName": "FAQ",
+          "cachedResultUrl": "/projects/jBEOe5DECmoA4IC9/datatables/9qFgd1Npwmhg4Rjv"
+        },
+        "returnAll": true
+      },
+      "type": "n8n-nodes-base.dataTableTool",
+      "typeVersion": 1.1,
+      "position": [
+        672,
+        592
+      ],
+      "id": "14ac1989-b37f-4160-bd4d-2373628ffed3",
+      "name": "FAQ"
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "value": "Xmqa9lNTcFTM7Y5m",
+          "mode": "list",
+          "cachedResultName": "Menu",
+          "cachedResultUrl": "/projects/jBEOe5DECmoA4IC9/datatables/Xmqa9lNTcFTM7Y5m"
+        },
+        "returnAll": true
+      },
+      "type": "n8n-nodes-base.dataTableTool",
+      "typeVersion": 1.1,
+      "position": [
+        560,
+        592
+      ],
+      "id": "7cf4689d-b606-430c-80f0-c1ba91a8e619",
+      "name": "Menu"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        []
+      ]
+    },
+    "OpenAI Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "FAQ": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Menu": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": false
+  },
+  "versionId": "b60c4f90-f3e5-4a0d-b4ef-b635ede0e247",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "aaef63ee18d8b544de41874fa5f8030b777ca2d278dafea4eecd2da4b7649f51"
+  },
+  "id": "raLee5YZrcNX51mQ",
+  "tags": []
+}
