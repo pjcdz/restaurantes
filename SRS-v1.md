@@ -2,7 +2,7 @@
 
 **Versión:** 1.0 (No extendida)  
 **Fecha:** 2026-02-27  
-**Estado:** Borrador para validación
+**Estado:** Borrador para validación (pre-produccion)
 
 ---
 
@@ -17,6 +17,10 @@ El sistema cubre:
 - Toma y validación de pedidos por chat
 - Mantenimiento de contexto conversacional por cliente
 - Derivación a operador humano cuando sea necesario
+
+**Estado operativo actual:**
+- No existe una implementacion productiva activa.
+- Los flujos actuales se consideran MVP/prototipo funcional para validacion.
 
 **Fuera del alcance actual:**
 - Integración con WhatsApp (roadmap)
@@ -37,6 +41,7 @@ El sistema cubre:
 - `libro.txt` - Criterios de ingeniería de requerimientos
 - `transcript.txt` - Objetivos de negocio y contexto
 - Flujos n8n: `MVP copy-2.json`, `Apertura-2.json`, `Preguntas.json`
+- `Prompt-Maestro-v2.md` - Prompt de investigacion tecnica para la evolucion a produccion
 
 ---
 
@@ -90,6 +95,7 @@ El sistema es un **bot de mensajería** que opera sobre n8n con orquestación de
 4. **Mantener trazabilidad** del estado de pedidos por teléfono/chat
 
 ### 2.4 Supuestos y Dependencias
+- Estado pre-produccion: no hay trafico productivo en vivo ni necesidad actual de migracion sin interrupcion
 - n8n operativo con credenciales configuradas
 - OpenAI API disponible (modelo GPT-4o/4.1)
 - Telegram Bot API configurado
@@ -100,6 +106,7 @@ El sistema es un **bot de mensajería** que opera sobre n8n con orquestación de
 - Calidad de respuestas depende de prompts y datos
 - Handoff humano no implementado end-to-end
 - Canal actual: solo Telegram
+- La evolucion debe ejecutarse como roadmap incremental de industrializacion (sin enfoque de cutover inmediato)
 
 ---
 
@@ -278,7 +285,7 @@ El sistema es un **bot de mensajería** que opera sobre n8n con orquestación de
 | ID | Descripción |
 |----|-------------|
 | TBD-001 | Implementación final de `Derivar Humano` con integración CRM |
-| TBD-002 | Definir canal objetivo final (Telegram vs Telegram + WhatsApp) |
+| TBD-002 | Definir canal productivo final (WhatsApp) y rol de Telegram en etapas de piloto |
 | TBD-003 | Políticas de seguridad, retención y anonimizado de datos |
 | TBD-004 | SLAs medibles (latencia, disponibilidad, tasa de error) |
 | TBD-005 | Versionado formal de prompts y proceso de aprobación |
