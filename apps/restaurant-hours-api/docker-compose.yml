@@ -1,0 +1,22 @@
+services:
+  api:
+    build:
+      context: .
+    environment:
+      PORT: "3000"
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+    ports:
+      - "3000:3000"
+
+  ngrok:
+    image: ngrok/ngrok:latest
+    depends_on:
+      - api
+    environment:
+      NGROK_AUTHTOKEN: ${NGROK_AUTHTOKEN}
+    command:
+      - "http"
+      - "api:3000"
+      - "--log=stdout"
+    ports:
+      - "4040:4040"

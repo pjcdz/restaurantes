@@ -1,0 +1,28 @@
+{
+  "name": "restaurant-hours-api",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/server.js",
+    "test": "vitest run",
+    "webhook:set": "tsx src/scripts/set-telegram-webhook.ts",
+    "docker:up": "docker compose up --build -d",
+    "docker:down": "docker compose down",
+    "docker:webhook:set": "docker compose exec -e NGROK_API_URL=http://ngrok:4040/api/tunnels api node dist/scripts/set-telegram-webhook.js"
+  },
+  "dependencies": {
+    "express": "^5.1.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.3",
+    "@types/node": "^24.7.2",
+    "@types/supertest": "^6.0.3",
+    "supertest": "^7.1.4",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
+  }
+}
