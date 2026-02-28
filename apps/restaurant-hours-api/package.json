@@ -14,6 +14,7 @@
     "docker:webhook:set": "docker compose exec -e NGROK_API_URL=http://ngrok:4040/api/tunnels api node dist/scripts/set-telegram-webhook.js"
   },
   "dependencies": {
+    "convex": "^1.32.0",
     "express": "^5.1.0"
   },
   "devDependencies": {
