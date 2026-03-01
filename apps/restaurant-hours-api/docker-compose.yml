@@ -5,8 +5,16 @@ services:
     environment:
       PORT: "3000"
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      CONVEX_URL: ${CONVEX_URL}
+      CONVEX_SITE_URL: ${CONVEX_SITE_URL}
+      GOOGLE_GENERATIVE_AI_API_KEY: ${GOOGLE_GENERATIVE_AI_API_KEY}
+      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
+      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
+      LANGFUSE_HOST: ${LANGFUSE_HOST:-https://cloud.langfuse.com}
     ports:
       - "3000:3000"
+    networks:
+      - app-network
 
   ngrok:
     image: ngrok/ngrok:latest
@@ -20,3 +28,9 @@ services:
       - "--log=stdout"
     ports:
       - "4040:4040"
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge

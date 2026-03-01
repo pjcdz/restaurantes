@@ -8,14 +8,24 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/server.js",
     "test": "vitest run",
+    "test:watch": "vitest",
+    "convex:dev": "convex dev",
+    "convex:deploy": "convex deploy",
     "webhook:set": "tsx src/scripts/set-telegram-webhook.ts",
     "docker:up": "docker compose up --build -d",
     "docker:down": "docker compose down",
-    "docker:webhook:set": "docker compose exec -e NGROK_API_URL=http://ngrok:4040/api/tunnels api node dist/scripts/set-telegram-webhook.js"
+    "docker:logs": "docker compose logs -f",
+    "docker:webhook:set": "docker compose exec -e NGROK_API_URL=http://ngrok:4040/api/tunnels api node dist/scripts/set-telegram-webhook.js",
+    "langfuse:setup": "echo 'Access LangFuse at http://localhost:3001 and create your project keys'"
   },
   "dependencies": {
+    "@langchain/core": "^0.3.57",
+    "@langchain/google-genai": "^0.2.9",
+    "@langchain/langgraph": "^0.2.67",
     "convex": "^1.32.0",
-    "express": "^5.1.0"
+    "express": "^5.1.0",
+    "langfuse": "^3.37.0",
+    "langfuse-langchain": "^3.37.0"
   },
   "devDependencies": {
     "@types/express": "^5.0.3",

@@ -8,13 +8,29 @@
  * @module
  */
 
+import type * as checkpoints from "../checkpoints.js";
+import type * as faq from "../faq.js";
+import type * as menu from "../menu.js";
+import type * as pedidos from "../pedidos.js";
+import type * as precios from "../precios.js";
+import type * as seed from "../seed.js";
+import type * as sessions from "../sessions.js";
+
 import type {
   ApiFromModules,
   FilterApi,
   FunctionReference,
 } from "convex/server";
 
-declare const fullApi: ApiFromModules<{}>;
+declare const fullApi: ApiFromModules<{
+  checkpoints: typeof checkpoints;
+  faq: typeof faq;
+  menu: typeof menu;
+  pedidos: typeof pedidos;
+  precios: typeof precios;
+  seed: typeof seed;
+  sessions: typeof sessions;
+}>;
 
 /**
  * A utility for referencing Convex functions in your app's public API.
