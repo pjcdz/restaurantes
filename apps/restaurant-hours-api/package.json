@@ -14,8 +14,20 @@
     "docker:webhook:set": "docker compose exec -e NGROK_API_URL=http://ngrok:4040/api/tunnels api node dist/scripts/set-telegram-webhook.js"
   },
   "dependencies": {
+    "@ai-sdk/google": "^3.0.34",
+    "@langchain/core": "^1.1.29",
+    "@langchain/langgraph": "^1.2.0",
+    "@langfuse/otel": "^4.6.1",
+    "@opentelemetry/api": "^1.9.0",
+    "@opentelemetry/core": "^2.5.1",
+    "@opentelemetry/exporter-trace-otlp-http": "^0.212.0",
+    "@opentelemetry/sdk-trace-base": "^2.5.1",
+    "@opentelemetry/sdk-trace-node": "^2.5.1",
+    "ai": "^6.0.105",
     "convex": "^1.32.0",
-    "express": "^5.1.0"
+    "express": "^5.1.0",
+    "zod": "^4.3.6",
+    "zod-to-json-schema": "^3.25.1"
   },
   "devDependencies": {
     "@types/express": "^5.0.3",

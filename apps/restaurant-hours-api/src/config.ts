@@ -15,3 +15,55 @@ export function getTelegramBotToken(): string {
 
   return token;
 }
+
+export function getConvexUrl(): string {
+  const url = process.env.CONVEX_URL?.trim();
+
+  if (!url) {
+    throw new Error("CONVEX_URL is required.");
+  }
+
+  return url;
+}
+
+export function getGoogleGenerativeAiApiKey(): string {
+  const apiKey = process.env.GOOGLE_GENERATIVE_AI_API_KEY?.trim();
+
+  if (!apiKey) {
+    throw new Error("GOOGLE_GENERATIVE_AI_API_KEY is required.");
+  }
+
+  return apiKey;
+}
+
+export type LangfuseSettings = {
+  publicKey: string;
+  secretKey: string;
+  baseUrl: string;
+  tracingEnvironment?: string;
+  release?: string;
+};
+
+export function getLangfuseSettings(): LangfuseSettings | null {
+  const publicKey = process.env.LANGFUSE_PUBLIC_KEY?.trim();
+  const secretKey = process.env.LANGFUSE_SECRET_KEY?.trim();
+
+  if (!publicKey || !secretKey) {
+    return null;
+  }
+
+  const baseUrl =
+    process.env.LANGFUSE_BASE_URL?.trim() ??
+    process.env.LANGFUSE_BASEURL?.trim() ??
+    "https://cloud.langfuse.com";
+  const tracingEnvironment = process.env.LANGFUSE_TRACING_ENVIRONMENT?.trim();
+  const release = process.env.LANGFUSE_RELEASE?.trim();
+
+  return {
+    publicKey,
+    secretKey,
+    baseUrl,
+    tracingEnvironment,
+    release
+  };
+}

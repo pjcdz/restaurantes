@@ -4,11 +4,14 @@ import { describe, expect, it, vi } from "vitest";
 import { createApp } from "./app";
 
 describe("POST /telegram/webhook", () => {
-  it("sends the availability reply to the same Telegram chat", async () => {
+  it("sends the assistant reply to the same Telegram chat", async () => {
     const telegramSender = vi.fn().mockResolvedValue(undefined);
+    const assistantService = {
+      handleIncomingMessage: vi.fn().mockResolvedValue("Respuesta generada por el asistente.")
+    };
     const app = createApp({
-      now: () => new Date("2026-02-28T15:00:00.000Z"),
-      telegramSender
+      telegramSender,
+      assistantService
     });
 
     const response = await request(app)
@@ -26,15 +29,25 @@ describe("POST /telegram/webhook", () => {
     expect(response.body).toEqual({
       ok: true
     });
+    expect(assistantService.handleIncomingMessage).toHaveBeenCalledWith({
+      chatId: "777",
+      text: "hola"
+    });
     expect(telegramSender).toHaveBeenCalledWith({
       chatId: 777,
-      text: "El restaurante esta abierto."
+      text: "Respuesta generada por el asistente."
     });
   });
 
   it("ignores non-message updates", async () => {
     const telegramSender = vi.fn().mockResolvedValue(undefined);
-    const app = createApp({ telegramSender });
+    const assistantService = {
+      handleIncomingMessage: vi.fn()
+    };
+    const app = createApp({
+      telegramSender,
+      assistantService
+    });
 
     const response = await request(app)
       .post("/telegram/webhook")
@@ -47,6 +60,7 @@ describe("POST /telegram/webhook", () => {
       ok: true,
       ignored: true
     });
+    expect(assistantService.handleIncomingMessage).not.toHaveBeenCalled();
     expect(telegramSender).not.toHaveBeenCalled();
   });
 

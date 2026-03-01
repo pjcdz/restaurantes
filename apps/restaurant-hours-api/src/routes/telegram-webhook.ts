@@ -1,14 +1,17 @@
 import { Router } from "express";
 
 import { getTelegramBotToken } from "../config.js";
-import { getRestaurantAvailability } from "../services/restaurant-hours.js";
+import {
+  getDefaultConversationAssistant
+} from "../services/default-conversation-assistant.js";
+import { type ConversationAssistant } from "../services/conversation-assistant.js";
 import {
   sendTelegramTextMessage,
   type TelegramSender
 } from "../services/telegram.js";
 
 export type TelegramWebhookRouteOptions = {
-  now?: () => Date;
+  assistantService?: ConversationAssistant;
   telegramSender?: TelegramSender;
 };
 
@@ -35,7 +38,10 @@ export function createTelegramWebhookRouter(
   options: TelegramWebhookRouteOptions = {}
 ) {
   const router = Router();
-  const now = options.now ?? (() => new Date());
+  const resolveAssistantService: () => ConversationAssistant =
+    options.assistantService === undefined
+      ? () => getDefaultConversationAssistant()
+      : () => options.assistantService as ConversationAssistant;
   const telegramSender = options.telegramSender ?? createDefaultTelegramSender();
 
   router.post("/", async (request, response, next) => {
@@ -60,11 +66,23 @@ export function createTelegramWebhookRouter(
         });
       }
 
-      const availability = getRestaurantAvailability(now());
+      const text = update.message?.text;
+
+      if (typeof text !== "string" || text.trim() === "") {
+        return response.status(200).json({
+          ok: true,
+          ignored: true
+        });
+      }
+
+      const reply = await resolveAssistantService().handleIncomingMessage({
+        chatId: String(chatId),
+        text
+      });
 
       await telegramSender({
         chatId,
-        text: availability.message
+        text: reply
       });
 
       return response.status(200).json({
