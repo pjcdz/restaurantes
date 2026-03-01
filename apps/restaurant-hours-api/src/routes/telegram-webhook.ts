@@ -75,14 +75,11 @@ export function createTelegramWebhookRouter(
         });
       }
 
-      const reply = await resolveAssistantService().handleIncomingMessage({
-        chatId: String(chatId),
-        text
-      });
-
-      await telegramSender({
+      void processTelegramUpdate({
+        assistantService: resolveAssistantService(),
         chatId,
-        text: reply
+        telegramSender,
+        text
       });
 
       return response.status(200).json({
@@ -94,4 +91,25 @@ export function createTelegramWebhookRouter(
   });
 
   return router;
+}
+
+async function processTelegramUpdate(input: {
+  assistantService: ConversationAssistant;
+  chatId: number;
+  telegramSender: TelegramSender;
+  text: string;
+}) {
+  try {
+    const reply = await input.assistantService.handleIncomingMessage({
+      chatId: String(input.chatId),
+      text: input.text
+    });
+
+    await input.telegramSender({
+      chatId: input.chatId,
+      text: reply
+    });
+  } catch (error) {
+    console.error("Telegram webhook background processing failed.", error);
+  }
 }

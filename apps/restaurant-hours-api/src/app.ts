@@ -1,17 +1,23 @@
 import express, { type ErrorRequestHandler } from "express";
 
+import { createAdminRouter, type AdminRouteOptions } from "./routes/admin.js";
 import { createMessageRouter, type MessageRouteOptions } from "./routes/message.js";
 import {
   createTelegramWebhookRouter,
   type TelegramWebhookRouteOptions
 } from "./routes/telegram-webhook.js";
 
-export type AppOptions = MessageRouteOptions & TelegramWebhookRouteOptions;
+export type AppOptions =
+  & AdminRouteOptions
+  & MessageRouteOptions
+  & TelegramWebhookRouteOptions;
 
 export function createApp(options: AppOptions = {}) {
   const app = express();
 
   app.use(express.json());
+  app.use(express.urlencoded({ extended: false }));
+  app.use("/admin", createAdminRouter(options));
   app.use("/message", createMessageRouter(options));
   app.use("/telegram/webhook", createTelegramWebhookRouter(options));
 

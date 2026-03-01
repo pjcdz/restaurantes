@@ -71,6 +71,15 @@ const priceValidator = v.object({
   aliases: v.array(v.string())
 });
 
+const adminCatalogItemValidator = v.object({
+  item: v.string(),
+  descripcion: v.string(),
+  precio: v.number(),
+  categoria: v.string(),
+  disponible: v.boolean(),
+  aliases: v.array(v.string())
+});
+
 export const upsertSessionByChatId = mutation({
   args: {
     chatId: v.string()
@@ -302,6 +311,59 @@ export const listPriceEntries = query({
   }
 });
 
+export const listCatalogItemsForAdmin = query({
+  args: {},
+  returns: v.array(adminCatalogItemValidator),
+  handler: async (ctx) => {
+    const [menuRows, priceRows] = await Promise.all([
+      ctx.db.query("menu").collect(),
+      ctx.db.query("precios").collect()
+    ]);
+    const productsByName = new Map<string, {
+      item: string;
+      descripcion: string;
+      precio: number;
+      categoria: string;
+      disponible: boolean;
+      aliases: Array<string>;
+    }>();
+
+    for (const row of menuRows) {
+      productsByName.set(row.item, {
+        item: row.item,
+        descripcion: row.descripcion,
+        precio: row.precio,
+        categoria: row.categoria,
+        disponible: row.disponible,
+        aliases: []
+      });
+    }
+
+    for (const row of priceRows) {
+      const existing = productsByName.get(row.producto);
+
+      if (existing) {
+        existing.precio = row.precioUnitario;
+        existing.aliases = normalizeAliases(row.aliases);
+        continue;
+      }
+
+      productsByName.set(row.producto, {
+        item: row.producto,
+        descripcion: "",
+        precio: row.precioUnitario,
+        categoria: "",
+        disponible: false,
+        aliases: normalizeAliases(row.aliases)
+      });
+    }
+
+    return Array.from(productsByName.values()).sort((left, right) =>
+      left.item.localeCompare(right.item, "es")
+    );
+  }
+});
+
 export const upsertMenuItem = mutation({
   args: {
     item: v.string(),
@@ -344,6 +406,116 @@ export const upsertMenuItem = mutation({
   }
 });
 
+export const upsertCatalogItem = mutation({
+  args: {
+    originalItem: v.union(v.string(), v.null()),
+    item: v.string(),
+    descripcion: v.string(),
+    precio: v.number(),
+    categoria: v.string(),
+    disponible: v.boolean(),
+    aliases: v.array(v.string())
+  },
+  returns: adminCatalogItemValidator,
+  handler: async (ctx, args) => {
+    const currentKey = args.originalItem ?? args.item;
+    const normalizedAliases = normalizeAliases(args.aliases);
+    const [existingMenu, existingPrice] = await Promise.all([
+      ctx.db
+        .query("menu")
+        .withIndex("by_item", (q) => q.eq("item", currentKey))
+        .unique(),
+      ctx.db
+        .query("precios")
+        .withIndex("by_producto", (q) => q.eq("producto", currentKey))
+        .unique()
+    ]);
+
+    if (currentKey !== args.item) {
+      const [targetMenu, targetPrice] = await Promise.all([
+        ctx.db
+          .query("menu")
+          .withIndex("by_item", (q) => q.eq("item", args.item))
+          .unique(),
+        ctx.db
+          .query("precios")
+          .withIndex("by_producto", (q) => q.eq("producto", args.item))
+          .unique()
+      ]);
+
+      if (targetMenu && targetMenu._id !== existingMenu?._id) {
+        throw new Error("A menu item with that name already exists.");
+      }
+
+      if (targetPrice && targetPrice._id !== existingPrice?._id) {
+        throw new Error("A price entry with that name already exists.");
+      }
+    }
+
+    if (existingMenu) {
+      await ctx.db.patch(existingMenu._id, {
+        item: args.item,
+        descripcion: args.descripcion,
+        precio: args.precio,
+        categoria: args.categoria,
+        disponible: args.disponible
+      });
+    } else {
+      await ctx.db.insert("menu", {
+        item: args.item,
+        descripcion: args.descripcion,
+        precio: args.precio,
+        categoria: args.categoria,
+        disponible: args.disponible
+      });
+    }
+
+    if (existingPrice) {
+      await ctx.db.patch(existingPrice._id, {
+        producto: args.item,
+        precioUnitario: args.precio,
+        aliases: normalizedAliases
+      });
+    } else {
+      await ctx.db.insert("precios", {
+        producto: args.item,
+        precioUnitario: args.precio,
+        aliases: normalizedAliases
+      });
+    }
+
+    return {
+      item: args.item,
+      descripcion: args.descripcion,
+      precio: args.precio,
+      categoria: args.categoria,
+      disponible: args.disponible,
+      aliases: normalizedAliases
+    };
+  }
+});
+
+export const deleteMenuItem = mutation({
+  args: {
+    item: v.string()
+  },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const existing = await ctx.db
+      .query("menu")
+      .withIndex("by_item", (q) => q.eq("item", args.item))
+      .unique();
+
+    if (!existing) {
+      return null;
+    }
+
+    await ctx.db.delete(existing._id);
+
+    return null;
+  }
+});
+
 export const upsertFaqEntry = mutation({
   args: {
     tema: v.string(),
@@ -377,6 +549,27 @@ export const upsertFaqEntry = mutation({
       id,
       ...args
     };
+  }
+});
+
+export const deleteFaqEntry = mutation({
+  args: {
+    tema: v.string()
+  },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const existing = await ctx.db
+      .query("faq")
+      .withIndex("by_tema", (q) => q.eq("tema", args.tema))
+      .unique();
+
+    if (!existing) {
+      return null;
+    }
+
+    await ctx.db.delete(existing._id);
+
+    return null;
   }
 });
 
@@ -420,6 +613,56 @@ export const upsertPriceEntry = mutation({
       precioUnitario: args.precioUnitario,
       aliases
     };
+  }
+});
+
+export const deletePriceEntry = mutation({
+  args: {
+    producto: v.string()
+  },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const existing = await ctx.db
+      .query("precios")
+      .withIndex("by_producto", (q) => q.eq("producto", args.producto))
+      .unique();
+
+    if (!existing) {
+      return null;
+    }
+
+    await ctx.db.delete(existing._id);
+
+    return null;
+  }
+});
+
+export const deleteCatalogItem = mutation({
+  args: {
+    item: v.string()
+  },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const [existingMenu, existingPrice] = await Promise.all([
+      ctx.db
+        .query("menu")
+        .withIndex("by_item", (q) => q.eq("item", args.item))
+        .unique(),
+      ctx.db
+        .query("precios")
+        .withIndex("by_producto", (q) => q.eq("producto", args.item))
+        .unique()
+    ]);
+
+    if (existingMenu) {
+      await ctx.db.delete(existingMenu._id);
+    }
+
+    if (existingPrice) {
+      await ctx.db.delete(existingPrice._id);
+    }
+
+    return null;
   }
 });
 

@@ -833,4 +833,65 @@ describe("createConversationAssistant", () => {
       })
     ]);
   });
+
+  it("does not apply the same order message twice within a short dedupe window", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-03-01T00:00:00.000Z"));
+      const { repository, state } = createMemoryRepository({
+        prices: [
+          {
+            producto: "Bacon King",
+            precioUnitario: 11200,
+            aliases: ["bacon king", "bacon"]
+          },
+          {
+            producto: "Veggie Power",
+            precioUnitario: 9500,
+            aliases: ["veggie power", "veggie"]
+          }
+        ]
+      });
+      const assistant = createConversationAssistant({
+        repository,
+        composeResponse: async (input) => input.draftReply
+      });
+
+      const firstReply = await assistant.handleIncomingMessage({
+        chatId: "777",
+        text: "quiero una bacon king y una veggie power"
+      });
+
+      vi.setSystemTime(new Date("2026-03-01T00:00:03.000Z"));
+
+      const secondReply = await assistant.handleIncomingMessage({
+        chatId: "777",
+        text: "quiero una bacon king y una veggie power"
+      });
+
+      expect(firstReply).toBe(
+        "Anotado: 1 Bacon King ($11200), 1 Veggie Power ($9500). Total parcial: $20700. ¿Es para delivery o retiro?"
+      );
+      expect(secondReply).toBe(firstReply);
+      expect(state.orders).toEqual([
+        expect.objectContaining({
+          total: 20700,
+          items: [
+            {
+              producto: "Bacon King",
+              cantidad: 1,
+              precioUnitario: 11200
+            },
+            {
+              producto: "Veggie Power",
+              cantidad: 1,
+              precioUnitario: 9500
+            }
+          ]
+        })
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

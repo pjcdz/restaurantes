@@ -5,6 +5,10 @@ import {
   type ExtractedOrderLine,
   type ExtractOrderRequest
 } from "./order-extraction.js";
+import {
+  calculateLineSubtotal,
+  calculateOrderTotals
+} from "./order-calculator.js";
 
 export type ConversationIntent = "complaint" | "faq" | "greeting" | "order";
 
@@ -126,7 +130,14 @@ type PersistedConversationState = {
   intent: ConversationIntent | null;
   orderDraft: ConversationOrderDraft | null;
   threadId: string | null;
+  lastHandledMessage: string | null;
+  lastHandledAt: number | null;
+  lastResponseText: string | null;
 };
+
+type ConversationRoute = ConversationIntent | "duplicate";
+
+const DUPLICATE_MESSAGE_WINDOW_MS = 10_000;
 
 const ConversationState = Annotation.Root({
   chatId: Annotation<string>,
@@ -140,6 +151,11 @@ const ConversationState = Annotation.Root({
   validatedOrderLines: Annotation<Array<ResolvedOrderLine>>,
   invalidOrderLines: Annotation<Array<InvalidOrderLine>>,
   orderDraft: Annotation<ConversationOrderDraft | null>,
+  isDuplicate: Annotation<boolean>,
+  duplicateResponseText: Annotation<string>,
+  lastHandledMessage: Annotation<string | null>,
+  lastHandledAt: Annotation<number | null>,
+  lastResponseText: Annotation<string>,
   draftReply: Annotation<string>,
   responseText: Annotation<string>,
   threadId: Annotation<string>
@@ -174,6 +190,9 @@ export function createConversationAssistant(options: {
     .addNode("order_handler", async (state) =>
       orderHandlerNode(options.repository, state)
     )
+    .addNode("duplicate_handler", async (state) => ({
+      draftReply: state.duplicateResponseText
+    }))
     .addNode("complaint_handler", async () => ({
       draftReply:
         "Puedo dejar esto marcado para revision humana. Contame brevemente el problema y lo derivamos."
@@ -185,6 +204,7 @@ export function createConversationAssistant(options: {
     .addEdge("load_session", "analyze_message")
     .addConditionalEdges("analyze_message", routeByIntent, {
       complaint: "complaint_handler",
+      duplicate: "duplicate_handler",
       faq: "faq_handler",
       greeting: "greeting_handler",
       order: "resolve_order_request"
@@ -193,6 +213,7 @@ export function createConversationAssistant(options: {
     .addEdge("faq_handler", "format_response")
     .addEdge("resolve_order_request", "order_handler")
     .addEdge("order_handler", "format_response")
+    .addEdge("duplicate_handler", "format_response")
     .addEdge("complaint_handler", "format_response")
     .addEdge("format_response", END)
     .compile();
@@ -211,30 +232,50 @@ export function createConversationAssistant(options: {
         validatedOrderLines: [],
         invalidOrderLines: [],
         orderDraft: null,
+        isDuplicate: false,
+        duplicateResponseText: "",
+        lastHandledMessage: null,
+        lastHandledAt: null,
+        lastResponseText: "",
         draftReply: "",
         responseText: "",
         threadId: buildThreadId(input.chatId)
       });
 
       const session = requireSession(result.session);
+      const finalResponse = result.responseText || result.draftReply;
+      const checkpointTimestamp = Date.now();
 
       await options.repository.saveCheckpoint({
         sessionId: session.id,
         threadId: result.threadId,
         checkpoint: JSON.stringify({
           intent: result.intent,
+          lastHandledAt: result.isDuplicate
+            ? result.lastHandledAt
+            : checkpointTimestamp,
+          lastHandledMessage: result.isDuplicate
+            ? result.lastHandledMessage
+            : normalizeText(input.text),
+          lastResponseText: result.isDuplicate
+            ? result.lastResponseText || finalResponse
+            : finalResponse,
           orderDraft: result.orderDraft,
           threadId: result.threadId
         } satisfies PersistedConversationState),
-        createdAt: Date.now()
+        createdAt: checkpointTimestamp
       });
 
-      return result.responseText || result.draftReply;
+      return finalResponse;
     }
   };
 }
 
-function routeByIntent(state: ConversationGraphState): ConversationIntent {
+function routeByIntent(state: ConversationGraphState): ConversationRoute {
+  if (state.isDuplicate) {
+    return "duplicate";
+  }
+
   return state.intent ?? "faq";
 }
 
@@ -251,6 +292,9 @@ async function loadSessionNode(
 
   return {
     catalog,
+    lastHandledAt: persistedState.lastHandledAt,
+    lastHandledMessage: persistedState.lastHandledMessage,
+    lastResponseText: persistedState.lastResponseText ?? "",
     orderDraft: persistedState.orderDraft,
     session,
     threadId: persistedState.threadId ?? latestCheckpoint?.threadId ?? buildThreadId(state.chatId)
@@ -263,11 +307,26 @@ async function analyzeMessageNode(
 ) {
   const normalizedText = normalizeText(state.messageText);
 
+  if (isDuplicateMessage(state, normalizedText)) {
+    return {
+      duplicateResponseText: state.lastResponseText,
+      extractedOrderLines: [],
+      intent: state.intent ?? ("faq" as const),
+      invalidOrderLines: [],
+      isDuplicate: true,
+      requestedActions: [],
+      validatedOrderLines: [],
+      wantsMenu: false
+    };
+  }
+
   if (isComplaintMessage(normalizedText)) {
     return {
+      duplicateResponseText: "",
       extractedOrderLines: [],
       intent: "complaint" as const,
       invalidOrderLines: [],
+      isDuplicate: false,
       requestedActions: [],
       validatedOrderLines: [],
       wantsMenu: false
@@ -276,9 +335,11 @@ async function analyzeMessageNode(
 
   if (isGreetingMessage(normalizedText)) {
     return {
+      duplicateResponseText: "",
       extractedOrderLines: [],
       intent: "greeting" as const,
       invalidOrderLines: [],
+      isDuplicate: false,
       requestedActions: [],
       validatedOrderLines: [],
       wantsMenu: false
@@ -298,7 +359,9 @@ async function analyzeMessageNode(
     extractedOrderLines.length > 0 || isOrderFollowUpMessage(normalizedText, state.orderDraft);
 
   return {
+    duplicateResponseText: "",
     extractedOrderLines,
+    isDuplicate: false,
     intent: shouldUpdateOrder ? ("order" as const) : ("faq" as const),
     invalidOrderLines: [],
     requestedActions: buildRequestedActions(extraction.wantsMenu, shouldUpdateOrder),
@@ -386,7 +449,7 @@ function resolveOrderRequestNode(state: ConversationGraphState) {
       matchedProduct: price.producto,
       quantity: orderLine.quantity,
       precioUnitario: price.precioUnitario,
-      subtotal: orderLine.quantity * price.precioUnitario
+      subtotal: calculateLineSubtotal(orderLine.quantity, price.precioUnitario)
     });
   }
 
@@ -457,7 +520,7 @@ async function formatResponseNode(
   const session = requireSession(state.session);
   const intent = state.intent ?? "faq";
 
-  if (intent === "order") {
+  if (state.isDuplicate || intent === "order") {
     return {
       responseText: state.draftReply
     };
@@ -542,6 +605,9 @@ function parsePersistedConversationState(
   if (!checkpoint) {
     return {
       intent: null,
+      lastHandledAt: null,
+      lastHandledMessage: null,
+      lastResponseText: null,
       orderDraft: null,
       threadId: null
     };
@@ -552,16 +618,46 @@ function parsePersistedConversationState(
 
     return {
       intent: isConversationIntent(parsed.intent) ? parsed.intent : null,
+      lastHandledAt:
+        typeof parsed.lastHandledAt === "number" ? parsed.lastHandledAt : null,
+      lastHandledMessage:
+        typeof parsed.lastHandledMessage === "string"
+          ? parsed.lastHandledMessage
+          : null,
+      lastResponseText:
+        typeof parsed.lastResponseText === "string" ? parsed.lastResponseText : null,
       orderDraft: isConversationOrderDraft(parsed.orderDraft) ? parsed.orderDraft : null,
       threadId: typeof parsed.threadId === "string" ? parsed.threadId : null
     };
   } catch {
     return {
       intent: null,
+      lastHandledAt: null,
+      lastHandledMessage: null,
+      lastResponseText: null,
       orderDraft: null,
       threadId: checkpoint.threadId
     };
   }
+}
+
+function isDuplicateMessage(
+  state: ConversationGraphState,
+  normalizedText: string
+): boolean {
+  if (
+    !normalizedText ||
+    !state.lastHandledMessage ||
+    !state.lastHandledAt ||
+    !state.lastResponseText
+  ) {
+    return false;
+  }
+
+  return (
+    state.lastHandledMessage === normalizedText &&
+    Date.now() - state.lastHandledAt <= DUPLICATE_MESSAGE_WINDOW_MS
+  );
 }
 
 function normalizeText(value: string): string {
@@ -882,10 +978,7 @@ function mergeOrderItemsTool(
 }
 
 function recalculateOrderTool(orderDraft: ConversationOrderDraft) {
-  orderDraft.total = orderDraft.items.reduce(
-    (sum, item) => sum + item.cantidad * item.precioUnitario,
-    0
-  );
+  orderDraft.total = calculateOrderTotals(orderDraft.items).total;
 }
 
 function updateOrderDraftWithMessage(
