@@ -49,6 +49,31 @@ export function createAdminRouter(options: AdminRouteOptions = {}) {
     }
   });
 
+  router.get("/data", async (request, response, next) => {
+    try {
+      const adminData = await resolveRepository().getAdminData();
+      const catalogSnapshot = {
+        menu: adminData.products.map((p) => ({
+          item: p.item,
+          descripcion: p.descripcion,
+          precio: p.precio,
+          categoria: p.categoria,
+          disponible: p.disponible
+        })),
+        faq: adminData.faq,
+        prices: adminData.products.map((p) => ({
+          producto: p.item,
+          precioUnitario: p.precio,
+          aliases: p.aliases
+        }))
+      };
+
+      return response.status(200).json(catalogSnapshot);
+    } catch (error) {
+      return next(error);
+    }
+  });
+
   router.post("/products", async (request, response) => {
     try {
       const body = request.body as ProductFormBody;
