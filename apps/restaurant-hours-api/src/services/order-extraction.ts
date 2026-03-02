@@ -209,7 +209,9 @@ function parseOrderSegment(segment: string): ExtractedOrderLine | null {
     /\b(quiero|quisiera|pedido|pedir|agrega|agregame|suma|sumame|mandame|manda|traeme|trae|traes|dame|poneme|me|das|otra|otro|unas|unos|una|un|la|el|por|favor|porfa)\b/gu,
     " "
   );
-  const productText = cleaned.replace(/\b\d+\b/gu, " ").replace(/\s+/gu, " ").trim();
+  // Only remove the extracted quantity number, not all digits, to preserve product names with numbers
+  const quantityPattern = new RegExp(`\\b${quantity}\\b`, "gu");
+  const productText = cleaned.replace(quantityPattern, " ").replace(/\s+/gu, " ").trim();
 
   if (!productText) {
     return null;

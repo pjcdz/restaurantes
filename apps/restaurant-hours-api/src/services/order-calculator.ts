@@ -17,7 +17,7 @@ export function calculateOrderTotals(items: Array<ConversationOrderItem>): {
   for (const item of items) {
     const subtotal = calculateLineSubtotal(item.cantidad, item.precioUnitario);
 
-    subtotals[item.producto] = subtotal;
+    subtotals[item.producto] = (subtotals[item.producto] || 0) + subtotal;
     total += subtotal;
   }
 
