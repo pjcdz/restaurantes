@@ -11,7 +11,9 @@ describe("POST /telegram/webhook", () => {
     };
     const app = createApp({
       telegramSender,
-      assistantService
+      assistantService,
+      skipAuth: true,
+      skipSignatureValidation: true
     });
 
     const response = await request(app)
@@ -31,7 +33,8 @@ describe("POST /telegram/webhook", () => {
     });
     expect(assistantService.handleIncomingMessage).toHaveBeenCalledWith({
       chatId: "777",
-      text: "hola"
+      text: "hola",
+      tracingEnvironment: "dev"
     });
     expect(telegramSender).toHaveBeenCalledWith({
       chatId: 777,
@@ -52,7 +55,9 @@ describe("POST /telegram/webhook", () => {
     };
     const app = createApp({
       telegramSender,
-      assistantService
+      assistantService,
+      skipAuth: true,
+      skipSignatureValidation: true
     });
 
     const responseOrTimeout = await Promise.race([
@@ -83,7 +88,8 @@ describe("POST /telegram/webhook", () => {
     });
     expect(assistantService.handleIncomingMessage).toHaveBeenCalledWith({
       chatId: "777",
-      text: "hola"
+      text: "hola",
+      tracingEnvironment: "dev"
     });
     expect(telegramSender).not.toHaveBeenCalled();
 
@@ -106,7 +112,9 @@ describe("POST /telegram/webhook", () => {
     };
     const app = createApp({
       telegramSender,
-      assistantService
+      assistantService,
+      skipAuth: true,
+      skipSignatureValidation: true
     });
 
     const response = await request(app)
@@ -141,7 +149,9 @@ describe("POST /telegram/webhook", () => {
     };
     const app = createApp({
       telegramSender,
-      assistantService
+      assistantService,
+      skipAuth: true,
+      skipSignatureValidation: true
     });
 
     const response = await request(app)
@@ -160,7 +170,7 @@ describe("POST /telegram/webhook", () => {
   });
 
   it("rejects invalid Telegram payloads", async () => {
-    const app = createApp();
+    const app = createApp({ skipAuth: true, skipSignatureValidation: true });
 
     const response = await request(app).post("/telegram/webhook").send([]);
 

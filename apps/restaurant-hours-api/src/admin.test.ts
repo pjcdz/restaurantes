@@ -9,6 +9,8 @@ function buildAdminRepository() {
       products: [],
       faq: []
     }),
+    getHandedOffSessions: vi.fn().mockResolvedValue([]),
+    reactivateSession: vi.fn().mockResolvedValue(undefined),
     upsertCatalogItem: vi.fn().mockResolvedValue(undefined),
     deleteCatalogItem: vi.fn().mockResolvedValue(undefined),
     upsertFaqEntry: vi.fn().mockResolvedValue(undefined),
@@ -38,7 +40,8 @@ describe("admin catalog routes", () => {
         }
       ]
     });
-    const app = createApp({ adminRepository });
+    // Skip auth for testing
+    const app = createApp({ adminRepository, skipAuth: true });
 
     const response = await request(app).get("/admin");
 
@@ -63,7 +66,7 @@ describe("admin catalog routes", () => {
 
   it("renders flash feedback when the admin page receives a success message", async () => {
     const adminRepository = buildAdminRepository();
-    const app = createApp({ adminRepository });
+    const app = createApp({ adminRepository, skipAuth: true });
 
     const response = await request(app)
       .get("/admin")
@@ -79,7 +82,7 @@ describe("admin catalog routes", () => {
 
   it("renders flash feedback when the admin page receives an error message", async () => {
     const adminRepository = buildAdminRepository();
-    const app = createApp({ adminRepository });
+    const app = createApp({ adminRepository, skipAuth: true });
 
     const response = await request(app)
       .get("/admin")
@@ -91,6 +94,18 @@ describe("admin catalog routes", () => {
     expect(response.status).toBe(200);
     expect(response.text).toContain('class="flash flash-error"');
     expect(response.text).toContain("No se pudo guardar.");
+  });
+
+  it("renders hardened client-side escaping and CSRF header for handoff actions", async () => {
+    const adminRepository = buildAdminRepository();
+    const app = createApp({ adminRepository, skipAuth: true });
+
+    const response = await request(app).get("/admin");
+
+    expect(response.status).toBe(200);
+    expect(response.text).toContain('replaceAll("&", "&amp;")');
+    expect(response.text).toContain('replaceAll("<", "&lt;")');
+    expect(response.text).toContain('"X-CSRF-Token": csrfToken');
   });
 
   it("renders an inline product editor with aliases", async () => {
@@ -108,7 +123,7 @@ describe("admin catalog routes", () => {
       ],
       faq: []
     });
-    const app = createApp({ adminRepository });
+    const app = createApp({ adminRepository, skipAuth: true });
 
     const response = await request(app).get("/admin");
 
@@ -126,7 +141,7 @@ describe("admin catalog routes", () => {
 
   it("defaults new product items to available in the create form", async () => {
     const adminRepository = buildAdminRepository();
-    const app = createApp({ adminRepository });
+    const app = createApp({ adminRepository, skipAuth: true });
 
     const response = await request(app).get("/admin");
 
@@ -137,7 +152,7 @@ describe("admin catalog routes", () => {
 
   it("upserts unified products from a form submission", async () => {
     const adminRepository = buildAdminRepository();
-    const app = createApp({ adminRepository });
+    const app = createApp({ adminRepository, skipAuth: true });
 
     const response = await request(app)
       .post("/admin/products")
@@ -167,7 +182,7 @@ describe("admin catalog routes", () => {
 
   it("deletes unified products from the admin page", async () => {
     const adminRepository = buildAdminRepository();
-    const app = createApp({ adminRepository });
+    const app = createApp({ adminRepository, skipAuth: true });
 
     const response = await request(app)
       .post("/admin/products/delete")
@@ -183,7 +198,7 @@ describe("admin catalog routes", () => {
 
   it("upserts faq entries from a form submission", async () => {
     const adminRepository = buildAdminRepository();
-    const app = createApp({ adminRepository });
+    const app = createApp({ adminRepository, skipAuth: true });
 
     const response = await request(app)
       .post("/admin/faq")
@@ -205,7 +220,7 @@ describe("admin catalog routes", () => {
 
   it("deletes faq entries from the admin page", async () => {
     const adminRepository = buildAdminRepository();
-    const app = createApp({ adminRepository });
+    const app = createApp({ adminRepository, skipAuth: true });
 
     const response = await request(app)
       .post("/admin/faq/delete")
@@ -222,7 +237,7 @@ describe("admin catalog routes", () => {
   it("redirects back to the admin page with an error flash when saving a product fails", async () => {
     const adminRepository = buildAdminRepository();
     adminRepository.upsertCatalogItem.mockRejectedValue(new Error("boom"));
-    const app = createApp({ adminRepository });
+    const app = createApp({ adminRepository, skipAuth: true });
 
     const response = await request(app)
       .post("/admin/products")

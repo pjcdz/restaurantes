@@ -2,10 +2,12 @@ import { randomUUID } from "node:crypto";
 
 import { Router } from "express";
 
+import { apiRateLimiter } from "../middleware/rate-limiter.js";
 import {
   getDefaultConversationAssistant
 } from "../services/default-conversation-assistant.js";
 import { type ConversationAssistant } from "../services/conversation-assistant.js";
+import { resolveRequestTracingEnvironment } from "./tracing-environment.js";
 
 export type MessageRouteOptions = {
   assistantService?: ConversationAssistant;
@@ -25,7 +27,8 @@ export function createMessageRouter(options: MessageRouteOptions = {}) {
       : () => options.assistantService as ConversationAssistant;
   const createChatId = options.createChatId ?? (() => randomUUID());
 
-  router.post("/", async (request, response, next) => {
+  // SECURITY: Apply rate limiting to prevent abuse of the message endpoint
+  router.post("/", apiRateLimiter, async (request, response, next) => {
     try {
       if (
         typeof request.body !== "object" ||
@@ -47,9 +50,31 @@ export function createMessageRouter(options: MessageRouteOptions = {}) {
       }
 
       const chatId = resolveChatId(body.chatId, createChatId);
-      const reply = await resolveAssistantService().handleIncomingMessage({
+      const tracingEnvironment = resolveRequestTracingEnvironment(request);
+      const assistant = resolveAssistantService();
+
+      if (assistant.handleIncomingMessageDetailed) {
+        const detailed = await assistant.handleIncomingMessageDetailed({
+          chatId,
+          text: message,
+          tracingEnvironment
+        });
+
+        return response.status(200).json({
+          chatId,
+          reply: detailed.reply,
+          traceId: detailed.traceId,
+          observationId: detailed.observationId,
+          metrics: {
+            tokens: detailed.tokens
+          }
+        });
+      }
+
+      const reply = await assistant.handleIncomingMessage({
         chatId,
-        text: message
+        text: message,
+        tracingEnvironment
       });
 
       return response.status(200).json({

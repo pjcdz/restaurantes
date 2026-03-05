@@ -23,6 +23,24 @@ export function getDefaultConversationAssistant(): ConversationAssistant {
   cachedAssistant = {
     async handleIncomingMessage(input) {
       return await flushLangfuseAfter(() => baseAssistant.handleIncomingMessage(input));
+    },
+    async handleIncomingMessageDetailed(input) {
+      if (!baseAssistant.handleIncomingMessageDetailed) {
+        const reply = await flushLangfuseAfter(() => baseAssistant.handleIncomingMessage(input));
+        return {
+          reply,
+          tokens: {
+            inputTokens: 0,
+            outputTokens: 0,
+            totalTokens: 0,
+            estimatedOutputTokens: 0
+          }
+        };
+      }
+
+      return await flushLangfuseAfter(() =>
+        baseAssistant.handleIncomingMessageDetailed!(input)
+      );
     }
   };
 

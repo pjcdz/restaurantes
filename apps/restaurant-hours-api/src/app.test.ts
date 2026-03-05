@@ -11,7 +11,8 @@ describe("POST /message", () => {
     const createChatId = vi.fn(() => "generated-1");
     const app = createApp({
       assistantService,
-      createChatId
+      createChatId,
+      skipAuth: true
     });
 
     const response = await request(app).post("/message").send({ message: "hola" });
@@ -23,7 +24,8 @@ describe("POST /message", () => {
     });
     expect(assistantService.handleIncomingMessage).toHaveBeenCalledWith({
       chatId: "http:generated-1",
-      text: "hola"
+      text: "hola",
+      tracingEnvironment: "dev"
     });
     expect(createChatId).toHaveBeenCalledTimes(1);
   });
@@ -33,7 +35,8 @@ describe("POST /message", () => {
       handleIncomingMessage: vi.fn().mockResolvedValue("Seguimos con el pedido.")
     };
     const app = createApp({
-      assistantService
+      assistantService,
+      skipAuth: true
     });
 
     const response = await request(app)
@@ -47,8 +50,54 @@ describe("POST /message", () => {
     });
     expect(assistantService.handleIncomingMessage).toHaveBeenCalledWith({
       chatId: "web-123",
-      text: "agregame otra clasica"
+      text: "agregame otra clasica",
+      tracingEnvironment: "dev"
     });
+  });
+
+  it("returns trace and token metrics when detailed assistant response is available", async () => {
+    const assistantService = {
+      handleIncomingMessage: vi.fn().mockResolvedValue("fallback"),
+      handleIncomingMessageDetailed: vi.fn().mockResolvedValue({
+        reply: "Respuesta detallada.",
+        traceId: "trace-abc",
+        tokens: {
+          inputTokens: 120,
+          outputTokens: 45,
+          totalTokens: 165,
+          estimatedOutputTokens: 0
+        }
+      })
+    };
+    const app = createApp({
+      assistantService,
+      skipAuth: true
+    });
+
+    const response = await request(app)
+      .post("/message")
+      .send({ message: "hola", chatId: "web-123" });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({
+      chatId: "web-123",
+      reply: "Respuesta detallada.",
+      traceId: "trace-abc",
+      metrics: {
+        tokens: {
+          inputTokens: 120,
+          outputTokens: 45,
+          totalTokens: 165,
+          estimatedOutputTokens: 0
+        }
+      }
+    });
+    expect(assistantService.handleIncomingMessageDetailed).toHaveBeenCalledWith({
+      chatId: "web-123",
+      text: "hola",
+      tracingEnvironment: "dev"
+    });
+    expect(assistantService.handleIncomingMessage).not.toHaveBeenCalled();
   });
 
   it("generates a new chatId for each request when none is provided", async () => {
@@ -61,7 +110,8 @@ describe("POST /message", () => {
       .mockReturnValueOnce("generated-2");
     const app = createApp({
       assistantService,
-      createChatId
+      createChatId,
+      skipAuth: true
     });
 
     const firstResponse = await request(app).post("/message").send({ message: "hola" });
@@ -79,16 +129,40 @@ describe("POST /message", () => {
     });
     expect(assistantService.handleIncomingMessage).toHaveBeenNthCalledWith(1, {
       chatId: "http:generated-1",
-      text: "hola"
+      text: "hola",
+      tracingEnvironment: "dev"
     });
     expect(assistantService.handleIncomingMessage).toHaveBeenNthCalledWith(2, {
       chatId: "http:generated-2",
-      text: "hola de nuevo"
+      text: "hola de nuevo",
+      tracingEnvironment: "dev"
+    });
+  });
+
+  it("classifies non-local hosts as prod tracing environment", async () => {
+    const assistantService = {
+      handleIncomingMessage: vi.fn().mockResolvedValue("Respuesta del asistente.")
+    };
+    const app = createApp({
+      assistantService,
+      skipAuth: true
+    });
+
+    const response = await request(app)
+      .post("/message")
+      .set("Host", "api.example.com")
+      .send({ message: "hola" });
+
+    expect(response.status).toBe(200);
+    expect(assistantService.handleIncomingMessage).toHaveBeenCalledWith({
+      chatId: expect.any(String),
+      text: "hola",
+      tracingEnvironment: "prod"
     });
   });
 
   it("rejects non-object JSON payloads", async () => {
-    const app = createApp();
+    const app = createApp({ skipAuth: true });
 
     const response = await request(app).post("/message").send([]);
 
@@ -99,7 +173,7 @@ describe("POST /message", () => {
   });
 
   it("rejects missing or empty messages", async () => {
-    const app = createApp();
+    const app = createApp({ skipAuth: true });
 
     const response = await request(app).post("/message").send({ message: "   " });
 

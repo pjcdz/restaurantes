@@ -1,6 +1,6 @@
 import { v } from "convex/values";
 
-import { mutation, query } from "./_generated/server";
+import { mutation, query } from "./_generated/server.js";
 
 const sessionValidator = v.object({
   id: v.id("sessions"),
@@ -683,3 +683,109 @@ function normalizeAliases(
 
   return Array.from(uniqueAliases);
 }
+
+/**
+ * Updates the status of a session by chatId.
+ * Used for handoff functionality to mark sessions as handed_off.
+ */
+export const updateSessionStatus = mutation({
+  args: {
+    chatId: v.string(),
+    status: v.union(
+      v.literal("active"),
+      v.literal("handed_off"),
+      v.literal("paused")
+    )
+  },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const existing = await ctx.db
+      .query("sessions")
+      .withIndex("by_chatId", (q) => q.eq("chatId", args.chatId))
+      .unique();
+
+    if (!existing) {
+      console.log(JSON.stringify({
+        level: "INFO",
+        message: "No session found for chatId",
+        chatId: args.chatId
+      }));
+      return null;
+    }
+
+    await ctx.db.patch(existing._id, {
+      status: args.status,
+      updatedAt: Date.now()
+    });
+
+    console.log(JSON.stringify({
+      level: "INFO",
+      message: "Session status updated",
+      sessionId: existing._id,
+      chatId: args.chatId,
+      status: args.status
+    }));
+
+    return null;
+  }
+});
+
+/**
+ * Gets the current status of a session by chatId.
+ * Returns null if no session exists.
+ */
+export const getSessionStatus = query({
+  args: {
+    chatId: v.string()
+  },
+  returns: v.union(
+    v.literal("active"),
+    v.literal("handed_off"),
+    v.literal("paused"),
+    v.null()
+  ),
+  handler: async (ctx, args) => {
+    const session = await ctx.db
+      .query("sessions")
+      .withIndex("by_chatId", (q) => q.eq("chatId", args.chatId))
+      .unique();
+
+    if (!session) {
+      return null;
+    }
+
+    return session.status;
+  }
+});
+
+/**
+ * Lists all sessions with handed_off status.
+ * Used by admin panel to manage handed-off conversations.
+ */
+export const listHandedOffSessions = query({
+  args: {},
+  returns: v.array(v.object({
+    id: v.id("sessions"),
+    chatId: v.string(),
+    phoneNumber: v.union(v.string(), v.null()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+    status: v.literal("handed_off")
+  })),
+  handler: async (ctx) => {
+    const sessions = await ctx.db
+      .query("sessions")
+      .withIndex("by_status", (q) => q.eq("status", "handed_off"))
+      .order("desc")
+      .collect();
+
+    return sessions.map((session) => ({
+      id: session._id,
+      chatId: session.chatId,
+      phoneNumber: session.phoneNumber,
+      createdAt: session.createdAt,
+      updatedAt: session.updatedAt,
+      status: "handed_off" as const
+    }));
+  }
+});

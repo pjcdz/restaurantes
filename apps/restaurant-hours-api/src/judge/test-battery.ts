@@ -32,6 +32,18 @@ export const generateTestBattery: TestBatteryGenerator = (catalog: CatalogSnapsh
   // Edge cases - error handling
   tests.push(...generateEdgeCaseTests(productNames));
 
+  // Payment tests - payment and change calculation
+  tests.push(...generatePaymentTests(productNames));
+
+  // Handoff tests - human agent escalation
+  tests.push(...generateHandoffTests());
+
+  // Security tests - authentication and validation
+  tests.push(...generateSecurityTests());
+
+  // Resilience tests - circuit breaker and fallback
+  tests.push(...generateResilienceTests());
+
   return tests;
 };
 
@@ -397,4 +409,265 @@ export function getRandomProducts(
   const available = products.filter((p) => p.disponible);
   const shuffled = [...available].sort(() => Math.random() - 0.5);
   return shuffled.slice(0, Math.min(count, shuffled.length)).map((p) => p.item);
+}
+
+/**
+ * Payment test cases - payment and change calculation
+ */
+function generatePaymentTests(productNames: Array<string>): Array<TestCase> {
+  const tests: Array<TestCase> = [];
+
+  if (productNames.length === 0) {
+    return tests;
+  }
+
+  const product = productNames[0];
+
+  // JDG-01: Exact payment calculation
+  tests.push({
+    id: "PAY-01",
+    category: "payment",
+    description: "Exact payment calculation",
+    messages: [
+      `Quiero una ${product.toLowerCase()} de $5000`,
+      "Pago con $5000 exactos"
+    ],
+    expectedBehavior: "Should confirm exact payment, no change needed"
+  });
+
+  // JDG-02: Change calculation request
+  tests.push({
+    id: "PAY-02",
+    category: "payment",
+    description: "Change calculation request",
+    messages: [
+      `Quiero 2 ${product.toLowerCase()} de $8000 cada una`,
+      "Pago con $20000"
+    ],
+    expectedBehavior: "Should calculate change of $4000"
+  });
+
+  // JDG-03: Insufficient payment handling
+  tests.push({
+    id: "PAY-03",
+    category: "payment",
+    description: "Insufficient payment handling",
+    messages: [
+      `Quiero un combo de $15000`,
+      "Tengo $10000 nada más"
+    ],
+    expectedBehavior: "Should inform customer payment is insufficient and show amount needed"
+  });
+
+  // Additional payment scenarios
+  tests.push({
+    id: "PAY-04",
+    category: "payment",
+    description: "Payment method selection",
+    messages: [
+      `Quiero una ${product.toLowerCase()}`,
+      "¿Cómo puedo pagar?"
+    ],
+    expectedBehavior: "Should list available payment methods from FAQ"
+  });
+
+  tests.push({
+    id: "PAY-05",
+    category: "payment",
+    description: "Large bill payment",
+    messages: [
+      `Quiero una ${product.toLowerCase()} de $3000`,
+      "Te pago con $50000"
+    ],
+    expectedBehavior: "Should calculate and confirm correct change amount"
+  });
+
+  return tests;
+}
+
+/**
+ * Handoff test cases - human agent escalation
+ */
+function generateHandoffTests(): Array<TestCase> {
+  const tests: Array<TestCase> = [];
+
+  // JDG-HANDOFF-01: Complaint triggers handoff
+  tests.push({
+    id: "HANDOFF-01",
+    category: "handoff",
+    description: "Complaint triggers handoff",
+    messages: [
+      "Quiero hablar con un supervisor, mi pedido llegó mal"
+    ],
+    expectedBehavior: "Should trigger human handoff and inform customer they will be connected to a human agent"
+  });
+
+  // JDG-HANDOFF-02: Explicit supervisor request
+  tests.push({
+    id: "HANDOFF-02",
+    category: "handoff",
+    description: "Explicit supervisor request",
+    messages: [
+      "Necesito hablar con un gerente, tuve un problema grave"
+    ],
+    expectedBehavior: "Should acknowledge request and initiate handoff process"
+  });
+
+  // JDG-HANDOFF-03: Frustrated customer
+  tests.push({
+    id: "HANDOFF-03",
+    category: "handoff",
+    description: "Frustrated customer triggers handoff",
+    messages: [
+      "Ya te pregunté 3 veces lo mismo y no me respondes bien",
+      "Paso a buscar un humano"
+    ],
+    expectedBehavior: "Should detect frustration and offer human handoff"
+  });
+
+  // JDG-HANDOFF-04: Complex issue beyond bot scope
+  tests.push({
+    id: "HANDOFF-04",
+    category: "handoff",
+    description: "Complex issue beyond bot scope",
+    messages: [
+      "Tengo una queja formal sobre alergias alimentarias y necesito hablar con el responsable"
+    ],
+    expectedBehavior: "Should escalate to human agent due to serious nature of complaint"
+  });
+
+  return tests;
+}
+
+/**
+ * Security test cases - authentication and validation
+ * Note: These tests require special setup to validate security behaviors
+ */
+function generateSecurityTests(): Array<TestCase> {
+  const tests: Array<TestCase> = [];
+
+  // JDG-SEC-01: Telegram signature validation
+  // This is a meta-test that validates webhook security
+  tests.push({
+    id: "SEC-01",
+    category: "security",
+    description: "Telegram signature validation",
+    messages: [
+      // This test validates that requests without valid signatures are rejected
+      // The actual test is performed at the HTTP layer, not via message
+      "[META: Webhook security test - validates X-Telegram-Bot-Api-Secret-Token header]"
+    ],
+    expectedBehavior: "Should reject requests without valid X-Telegram-Bot-Api-Secret-Token header with 401/403"
+  });
+
+  // JDG-SEC-02: JWT authentication for admin
+  tests.push({
+    id: "SEC-02",
+    category: "security",
+    description: "JWT authentication required for admin",
+    messages: [
+      "[META: Admin route security test - validates JWT authentication]"
+    ],
+    expectedBehavior: "Should reject unauthenticated admin requests with 401 Unauthorized"
+  });
+
+  // JDG-SEC-03: Input sanitization
+  tests.push({
+    id: "SEC-03",
+    category: "security",
+    description: "Input sanitization - XSS prevention",
+    messages: [
+      "<script>alert('xss')</script> Hola"
+    ],
+    expectedBehavior: "Should sanitize input and not execute or reflect script tags"
+  });
+
+  // JDG-SEC-04: SQL injection prevention
+  tests.push({
+    id: "SEC-04",
+    category: "security",
+    description: "SQL injection prevention",
+    messages: [
+      "'; DROP TABLE users; --"
+    ],
+    expectedBehavior: "Should safely handle malicious input without database impact"
+  });
+
+  // JDG-SEC-05: Rate limiting
+  tests.push({
+    id: "SEC-05",
+    category: "security",
+    description: "Rate limiting validation",
+    messages: [
+      "[META: Rate limiting test - validates request throttling]"
+    ],
+    expectedBehavior: "Should enforce rate limits and return 429 when exceeded"
+  });
+
+  return tests;
+}
+
+/**
+ * Resilience test cases - circuit breaker and fallback
+ * Note: These tests validate system resilience patterns
+ */
+function generateResilienceTests(): Array<TestCase> {
+  const tests: Array<TestCase> = [];
+
+  // JDG-RES-01: Circuit breaker opens on failures
+  tests.push({
+    id: "RES-01",
+    category: "resilience",
+    description: "Circuit breaker opens on failures",
+    messages: [
+      "[META: Circuit breaker test - validates failure threshold handling]"
+    ],
+    expectedBehavior: "Circuit breaker should open after configured failure threshold and return fallback response"
+  });
+
+  // JDG-RES-02: Graceful degradation returns fallback
+  tests.push({
+    id: "RES-02",
+    category: "resilience",
+    description: "Graceful degradation returns fallback",
+    messages: [
+      "[META: Graceful degradation test - validates FAQ-based fallback when Gemini unavailable]"
+    ],
+    expectedBehavior: "Should return FAQ-based fallback response when Gemini API is unavailable"
+  });
+
+  // JDG-RES-03: Circuit breaker recovery (half-open state)
+  tests.push({
+    id: "RES-03",
+    category: "resilience",
+    description: "Circuit breaker recovery",
+    messages: [
+      "[META: Circuit breaker recovery test - validates half-open state transitions]"
+    ],
+    expectedBehavior: "Circuit breaker should transition to half-open after timeout and allow test requests"
+  });
+
+  // JDG-RES-04: Timeout handling
+  tests.push({
+    id: "RES-04",
+    category: "resilience",
+    description: "Timeout handling",
+    messages: [
+      "[META: Timeout test - validates request timeout handling]"
+    ],
+    expectedBehavior: "Should handle request timeouts gracefully and return appropriate error response"
+  });
+
+  // JDG-RES-05: Retry with exponential backoff
+  tests.push({
+    id: "RES-05",
+    category: "resilience",
+    description: "Retry with exponential backoff",
+    messages: [
+      "[META: Retry test - validates exponential backoff on transient failures]"
+    ],
+    expectedBehavior: "Should retry failed requests with exponential backoff before giving up"
+  });
+
+  return tests;
 }

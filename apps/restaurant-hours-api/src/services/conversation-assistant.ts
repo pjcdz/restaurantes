@@ -6,9 +6,28 @@ import {
   type ExtractOrderRequest
 } from "./order-extraction.js";
 import {
+  calculateChange,
   calculateLineSubtotal,
-  calculateOrderTotals
+  calculateOrderTotals,
+  InsufficientPaymentError
 } from "./order-calculator.js";
+import {
+  createConversationTraceContext,
+  createTracedNodeExecutor,
+  getTraceTokenUsage,
+  recordTraceError,
+  setTraceInput,
+  setTraceOutput,
+  type ConversationTraceContext
+} from "./conversation-tracing.js";
+import { degradationHandler } from "../resilience/graceful-degradation.js";
+import { CircuitOpenError } from "../resilience/circuit-breaker.js";
+import { Logger } from "../utils/logger.js";
+
+/**
+ * Logger instance for conversation assistant.
+ */
+const logger = new Logger({ service: "conversation-assistant" });
 
 export type ConversationIntent = "complaint" | "faq" | "greeting" | "order";
 
@@ -64,6 +83,7 @@ export type ConversationOrderDraft = {
   tipoEntrega: "delivery" | "pickup" | null;
   metodoPago: string | null;
   nombreCliente: string | null;
+  montoAbono: number | null;
   total: number;
   estado: ConversationOrderStatus;
 };
@@ -89,6 +109,12 @@ export type ConversationRepository = {
   upsertOrderForSession(
     input: Omit<ConversationOrderRecord, "createdAt" | "id" | "updatedAt">
   ): Promise<ConversationOrderRecord>;
+  /**
+   * Updates the status of a session.
+   * @param chatId - The chat ID of the session
+   * @param status - The new status ('active', 'handed_off', 'paused')
+   */
+  updateSessionStatus(chatId: string, status: "active" | "handed_off" | "paused"): Promise<void>;
 };
 
 export type ComposeResponseInput = {
@@ -106,7 +132,25 @@ export type ConversationAssistant = {
   handleIncomingMessage(input: {
     chatId: string;
     text: string;
+    tracingEnvironment?: string;
   }): Promise<string>;
+  handleIncomingMessageDetailed?(input: {
+    chatId: string;
+    text: string;
+    tracingEnvironment?: string;
+  }): Promise<ConversationAssistantResult>;
+};
+
+export type ConversationAssistantResult = {
+  reply: string;
+  traceId?: string;
+  observationId?: string;
+  tokens: {
+    inputTokens: number;
+    outputTokens: number;
+    totalTokens: number;
+    estimatedOutputTokens: number;
+  };
 };
 
 type RequestedAction = "answer_faq" | "show_menu" | "update_order";
@@ -135,9 +179,12 @@ type PersistedConversationState = {
   lastResponseText: string | null;
 };
 
-type ConversationRoute = ConversationIntent | "duplicate";
+type ConversationRoute = ConversationIntent | "duplicate" | "handed_off";
 
 const DUPLICATE_MESSAGE_WINDOW_MS = 10_000;
+
+const HANDOFF_RESPONSE =
+  "Tu conversacion ha sido transferida a un operador humano. Te responderan a la brevedad. Gracias por tu paciencia.";
 
 const ConversationState = Annotation.Root({
   chatId: Annotation<string>,
@@ -152,13 +199,15 @@ const ConversationState = Annotation.Root({
   invalidOrderLines: Annotation<Array<InvalidOrderLine>>,
   orderDraft: Annotation<ConversationOrderDraft | null>,
   isDuplicate: Annotation<boolean>,
+  isHandedOff: Annotation<boolean>,
   duplicateResponseText: Annotation<string>,
   lastHandledMessage: Annotation<string | null>,
   lastHandledAt: Annotation<number | null>,
   lastResponseText: Annotation<string>,
   draftReply: Annotation<string>,
   responseText: Annotation<string>,
-  threadId: Annotation<string>
+  threadId: Annotation<string>,
+  traceContext: Annotation<ConversationTraceContext | null>
 });
 
 type ConversationGraphState = typeof ConversationState.State;
@@ -174,34 +223,76 @@ export function createConversationAssistant(options: {
   const composeResponse = options.composeResponse ?? (async (input) => input.draftReply);
   const extractOrderRequest =
     options.extractOrderRequest ?? createRuleBasedOrderExtractionAgent();
+  const executeNode = async <T>(
+    state: ConversationGraphState,
+    nodeName: string,
+    fn: () => Promise<T>
+  ): Promise<T> => {
+    if (!state.traceContext) {
+      return fn();
+    }
+
+    return createTracedNodeExecutor(state.traceContext).execute(nodeName, fn);
+  };
 
   const graph = new StateGraph(ConversationState)
     .addNode("load_session", async (state) =>
-      loadSessionNode(options.repository, state)
+      executeNode(state, "load_session", async () =>
+        loadSessionNode(options.repository, state)
+      )
+    )
+    .addNode("check_handed_off", async (state) =>
+      executeNode(state, "check_handed_off", async () =>
+        checkHandedOffNode(state)
+      )
     )
     .addNode("analyze_message", async (state) =>
-      analyzeMessageNode(extractOrderRequest, state)
+      executeNode(state, "analyze_message", async () =>
+        analyzeMessageNode(extractOrderRequest, state)
+      )
     )
-    .addNode("greeting_handler", async () => ({
-      draftReply: DEFAULT_GREETING
-    }))
-    .addNode("faq_handler", async (state) => faqHandlerNode(state))
-    .addNode("resolve_order_request", async (state) => resolveOrderRequestNode(state))
+    .addNode("greeting_handler", async (state) =>
+      executeNode(state, "greeting_handler", async () => ({
+        draftReply: DEFAULT_GREETING
+      }))
+    )
+    .addNode("faq_handler", async (state) =>
+      executeNode(state, "faq_handler", async () => faqHandlerNode(state))
+    )
+    .addNode("resolve_order_request", async (state) =>
+      executeNode(state, "resolve_order_request", async () => resolveOrderRequestNode(state))
+    )
     .addNode("order_handler", async (state) =>
-      orderHandlerNode(options.repository, state)
+      executeNode(state, "order_handler", async () =>
+        orderHandlerNode(options.repository, state)
+      )
     )
-    .addNode("duplicate_handler", async (state) => ({
-      draftReply: state.duplicateResponseText
-    }))
-    .addNode("complaint_handler", async () => ({
-      draftReply:
-        "Puedo dejar esto marcado para revision humana. Contame brevemente el problema y lo derivamos."
-    }))
+    .addNode("duplicate_handler", async (state) =>
+      executeNode(state, "duplicate_handler", async () => ({
+        draftReply: state.duplicateResponseText
+      }))
+    )
+    .addNode("complaint_handler", async (state) =>
+      executeNode(state, "complaint_handler", async () =>
+        complaintHandlerNode(options.repository, state)
+      )
+    )
+    .addNode("handoff_handler", async (state) =>
+      executeNode(state, "handoff_handler", async () => ({
+        draftReply: HANDOFF_RESPONSE
+      }))
+    )
     .addNode("format_response", async (state) =>
-      formatResponseNode(composeResponse, state)
+      executeNode(state, "format_response", async () =>
+        formatResponseNode(composeResponse, state)
+      )
     )
     .addEdge(START, "load_session")
-    .addEdge("load_session", "analyze_message")
+    .addEdge("load_session", "check_handed_off")
+    .addConditionalEdges("check_handed_off", routeByHandedOffStatus, {
+      handed_off: "handoff_handler",
+      continue: "analyze_message"
+    })
     .addConditionalEdges("analyze_message", routeByIntent, {
       complaint: "complaint_handler",
       duplicate: "duplicate_handler",
@@ -214,12 +305,31 @@ export function createConversationAssistant(options: {
     .addEdge("resolve_order_request", "order_handler")
     .addEdge("order_handler", "format_response")
     .addEdge("duplicate_handler", "format_response")
-    .addEdge("complaint_handler", "format_response")
+    .addEdge("complaint_handler", "handoff_handler")
+    .addEdge("handoff_handler", "format_response")
     .addEdge("format_response", END)
     .compile();
 
-  return {
-    async handleIncomingMessage(input) {
+  const handleIncomingMessageDetailed = async (
+    input: { chatId: string; text: string; tracingEnvironment?: string }
+  ): Promise<ConversationAssistantResult> => {
+    const traceContext = createConversationTraceContext(
+      input.chatId,
+      undefined,
+      undefined,
+      {
+        environment: input.tracingEnvironment
+      }
+    );
+    const tracedExecutor = createTracedNodeExecutor(traceContext);
+    let traceSucceeded = true;
+
+    setTraceInput(traceContext, {
+      chatId: input.chatId,
+      message: input.text
+    });
+
+    try {
       const result = await graph.invoke({
         chatId: input.chatId,
         messageText: input.text,
@@ -233,13 +343,15 @@ export function createConversationAssistant(options: {
         invalidOrderLines: [],
         orderDraft: null,
         isDuplicate: false,
+        isHandedOff: false,
         duplicateResponseText: "",
         lastHandledMessage: null,
         lastHandledAt: null,
         lastResponseText: "",
         draftReply: "",
         responseText: "",
-        threadId: buildThreadId(input.chatId)
+        threadId: buildThreadId(input.chatId),
+        traceContext
       });
 
       const session = requireSession(result.session);
@@ -266,8 +378,82 @@ export function createConversationAssistant(options: {
         createdAt: checkpointTimestamp
       });
 
-      return finalResponse;
+      setTraceOutput(traceContext, {
+        reply: finalResponse,
+        intent: result.intent,
+        isDuplicate: result.isDuplicate
+      });
+
+      return {
+        reply: finalResponse,
+        traceId: traceContext.otelTraceId ?? traceContext.context.traceId,
+        observationId: traceContext.rootObservationId,
+        tokens: getTraceTokenUsage(traceContext)
+      };
+    } catch (error) {
+      traceSucceeded = false;
+      const normalizedError = error instanceof Error ? error : new Error(String(error));
+      recordTraceError(traceContext, normalizedError);
+
+      // Graceful degradation: return FAQ-based fallback response instead of throwing
+      if (error instanceof CircuitOpenError) {
+        logger.warn("Circuit breaker open - returning graceful degradation response", undefined, {
+          chatId: input.chatId,
+          error: { name: error.name, message: error.message }
+        });
+
+        const normalizedText = normalizeText(input.text);
+        const intent = isGreetingMessage(normalizedText)
+          ? "greeting" as ConversationIntent
+          : isComplaintMessage(normalizedText)
+            ? "complaint" as ConversationIntent
+            : "faq" as ConversationIntent;
+        const fallbackResponse = degradationHandler.handleCircuitOpen("convex", intent, input.text);
+
+        setTraceOutput(traceContext, {
+          reply: fallbackResponse,
+          fallbackReason: "circuit_open",
+          error: normalizedError.message
+        });
+
+        return {
+          reply: fallbackResponse,
+          traceId: traceContext.otelTraceId ?? traceContext.context.traceId,
+          observationId: traceContext.rootObservationId,
+          tokens: getTraceTokenUsage(traceContext)
+        };
+      }
+
+      // For other errors, return a graceful fallback
+      logger.error("Conversation assistant error - returning fallback response", undefined, undefined, {
+        chatId: input.chatId,
+        error: { name: normalizedError.name, message: normalizedError.message }
+      });
+
+      const fallbackResponse = degradationHandler.getFallbackResponse("faq", input.text);
+      setTraceOutput(traceContext, {
+        reply: fallbackResponse,
+        fallbackReason: "unexpected_error",
+        error: normalizedError.message
+      });
+
+      return {
+        reply: fallbackResponse,
+        traceId: traceContext.otelTraceId ?? traceContext.context.traceId,
+        observationId: traceContext.rootObservationId,
+        tokens: getTraceTokenUsage(traceContext)
+      };
+    } finally {
+      tracedExecutor.end(traceSucceeded);
     }
+  };
+
+  return {
+    async handleIncomingMessage(input) {
+      const result = await handleIncomingMessageDetailed(input);
+      return result.reply;
+    },
+    handleIncomingMessageDetailed
   };
 }
 
@@ -277,6 +463,54 @@ function routeByIntent(state: ConversationGraphState): ConversationRoute {
   }
 
   return state.intent ?? "faq";
+}
+
+function routeByHandedOffStatus(
+  state: ConversationGraphState
+): "handed_off" | "continue" {
+  if (state.isHandedOff) {
+    return "handed_off";
+  }
+
+  return "continue";
+}
+
+function checkHandedOffNode(state: ConversationGraphState) {
+  const session = requireSession(state.session);
+
+  if (session.status === "handed_off") {
+    logger.info("Session is handed_off, ignoring message", undefined, {
+      sessionId: session.id,
+      chatId: state.chatId
+    });
+
+    return {
+      isHandedOff: true
+    };
+  }
+
+  return {
+    isHandedOff: false
+  };
+}
+
+async function complaintHandlerNode(
+  repository: ConversationRepository,
+  state: ConversationGraphState
+) {
+  const session = requireSession(state.session);
+
+  // Update session status to handed_off in Convex
+  await repository.updateSessionStatus(state.chatId, "handed_off");
+
+  logger.info("Session handed off for human intervention", undefined, {
+    sessionId: session.id
+  });
+
+  return {
+    draftReply:
+      "Entendido. Te voy a transferir con un operador humano que pueda ayudarte mejor. Un momento por favor."
+  };
 }
 
 async function loadSessionNode(
@@ -629,7 +863,16 @@ function parsePersistedConversationState(
       orderDraft: isConversationOrderDraft(parsed.orderDraft) ? parsed.orderDraft : null,
       threadId: typeof parsed.threadId === "string" ? parsed.threadId : null
     };
-  } catch {
+  } catch (error) {
+    // ERR-2: Log JSON parse failure instead of silently swallowing the error
+    logger.error("Failed to parse conversation checkpoint JSON - data may be corrupted", undefined, undefined, {
+      threadId: checkpoint.threadId,
+      sessionId: checkpoint.sessionId,
+      error: error instanceof Error
+        ? { name: error.name, message: error.message }
+        : { name: "UnknownError", message: String(error) },
+      checkpointLength: checkpoint.checkpoint.length
+    });
     return {
       intent: null,
       lastHandledAt: null,
@@ -702,13 +945,26 @@ function isOrderFollowUpMessage(
       "mercadopago",
       "alias",
       "me llamo",
-      "soy"
+      "soy",
+      "con",
+      "pago",
+      "tengo",
+      "abono"
     ])
   ) {
     return true;
   }
 
   if (!orderDraft.nombreCliente && looksLikeNameOnlyMessage(normalizedText)) {
+    return true;
+  }
+
+  // Recognize payment amount messages when waiting for montoAbono
+  if (
+    orderDraft.metodoPago === "efectivo" &&
+    orderDraft.montoAbono === null &&
+    /^\d+(?:\.\d+)?$/.test(normalizedText)
+  ) {
     return true;
   }
 
@@ -952,6 +1208,7 @@ function cloneOrderDraft(
     tipoEntrega: null,
     metodoPago: null,
     nombreCliente: null,
+    montoAbono: null,
     total: 0,
     estado: "incompleto"
   };
@@ -1036,6 +1293,42 @@ function updateOrderDraftWithMessage(
   } else if (!orderDraft.nombreCliente && looksLikeNameOnlyMessage(normalizedText)) {
     orderDraft.nombreCliente = normalizedText;
   }
+
+  // Extract montoAbono (payment amount) for cash payments
+  // Only parse when metodoPago is "efectivo" and montoAbono is not yet set
+  if (orderDraft.metodoPago === "efectivo" && orderDraft.montoAbono === null) {
+    const paymentAmount = extractPaymentAmount(normalizedText);
+    if (paymentAmount !== null) {
+      orderDraft.montoAbono = paymentAmount;
+    }
+  }
+}
+
+/**
+ * Extracts a payment amount from a normalized text message.
+ * Looks for patterns like "con 500", "pago 1000", "tengo 200", or just a number.
+ * @param normalizedText - The normalized message text
+ * @returns The extracted amount or null if not found
+ */
+function extractPaymentAmount(normalizedText: string): number | null {
+  // Pattern 1: "con X", "pago X", "tengo X", "abono X"
+  const withPrefixMatch = normalizedText.match(
+    /(?:con|pago|tengo|abono|son)\s+(\d+(?:\.\d+)?)/u
+  );
+  if (withPrefixMatch?.[1]) {
+    return parseFloat(withPrefixMatch[1]);
+  }
+
+  // Pattern 2: Just a number (if the message is simple enough)
+  // Only match if the message is primarily a number with optional currency symbols
+  const simpleNumberMatch = normalizedText.match(
+    /^(?:\$?\s*)?(\d+(?:\.\d+)?)(?:\s*(?:pesos|ars|\$))?$/u
+  );
+  if (simpleNumberMatch?.[1]) {
+    return parseFloat(simpleNumberMatch[1]);
+  }
+
+  return null;
 }
 
 function looksLikeNameOnlyMessage(normalizedText: string): boolean {
@@ -1108,6 +1401,11 @@ function determineOrderStatus(orderDraft: ConversationOrderDraft): ConversationO
     return "incompleto";
   }
 
+  // Require montoAbono for cash payments
+  if (orderDraft.metodoPago === "efectivo" && orderDraft.montoAbono === null) {
+    return "incompleto";
+  }
+
   return "completo";
 }
 
@@ -1128,6 +1426,11 @@ function buildOrderFollowUp(orderDraft: ConversationOrderDraft): string {
     return "¿A nombre de quien dejamos el pedido?";
   }
 
+  // Ask for payment amount when paying in cash
+  if (orderDraft.metodoPago === "efectivo" && orderDraft.montoAbono === null) {
+    return `El total es $${orderDraft.total}. ¿Con cuanto vas a pagar?`;
+  }
+
   const itemsSummary = orderDraft.items
     .map((item) => `${item.cantidad} ${item.producto}`)
     .join(", ");
@@ -1135,6 +1438,23 @@ function buildOrderFollowUp(orderDraft: ConversationOrderDraft): string {
     orderDraft.tipoEntrega === "delivery"
       ? `delivery a ${orderDraft.direccion}`
       : "retiro en sucursal";
+
+  // Include change information if paying in cash with montoAbono
+  if (orderDraft.metodoPago === "efectivo" && orderDraft.montoAbono !== null) {
+    try {
+      const vuelto = calculateChange(orderDraft.total, orderDraft.montoAbono);
+      if (vuelto > 0) {
+        return `¡Listo! Tu pedido: ${itemsSummary}, ${deliverySummary}. Total: $${orderDraft.total}. Abonas $${orderDraft.montoAbono}, tu vuelto es $${vuelto}.`;
+      }
+      // Exact payment
+      return `¡Listo! Tu pedido: ${itemsSummary}, ${deliverySummary}. Total: $${orderDraft.total}. Abonas con el monto exacto.`;
+    } catch (error) {
+      if (error instanceof InsufficientPaymentError) {
+        return `El monto ($${orderDraft.montoAbono}) es insuficiente. El total es $${orderDraft.total}. ¿Con cuanto vas a pagar?`;
+      }
+      throw error;
+    }
+  }
 
   return `¡Listo! Tu pedido: ${itemsSummary}, ${deliverySummary}. Total: $${orderDraft.total}.`;
 }
@@ -1150,10 +1470,17 @@ function isConversationOrderDraft(value: unknown): value is ConversationOrderDra
 
   const candidate = value as Partial<ConversationOrderDraft>;
 
+  // montoAbono can be null or a number, both are valid
+  const montoAbonoValid =
+    candidate.montoAbono === null ||
+    candidate.montoAbono === undefined ||
+    typeof candidate.montoAbono === "number";
+
   return (
     typeof candidate.telefono === "string" &&
     Array.isArray(candidate.items) &&
     typeof candidate.total === "number" &&
+    montoAbonoValid &&
     (candidate.estado === "completo" ||
       candidate.estado === "error_producto" ||
       candidate.estado === "incompleto")

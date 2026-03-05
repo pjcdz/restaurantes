@@ -18,6 +18,19 @@ export type AdminCatalogItemInput = AdminCatalogItem & {
   originalItem: string | null;
 };
 
+export type HandedOffSession = {
+  id: string;
+  chatId: string;
+  phoneNumber: string | null;
+  createdAt: number;
+  updatedAt: number;
+};
+
+export type HandoffAdminRepository = {
+  getHandedOffSessions(): Promise<Array<HandedOffSession>>;
+  reactivateSession(chatId: string): Promise<void>;
+};
+
 export type CatalogAdminRepository = {
   getAdminData(): Promise<{
     products: Array<AdminCatalogItem>;
@@ -68,6 +81,34 @@ export class ConvexAdminRepository implements CatalogAdminRepository {
   async deleteFaqEntry(tema: string): Promise<void> {
     await this.client.mutation(convexApi.conversations.deleteFaqEntry, {
       tema
+    });
+  }
+
+  async getHandedOffSessions(): Promise<Array<HandedOffSession>> {
+    const sessions = await this.client.query(
+      convexApi.conversations.listHandedOffSessions,
+      {}
+    );
+
+    return (sessions as Array<{
+      id: string;
+      chatId: string;
+      phoneNumber: string | null;
+      createdAt: number;
+      updatedAt: number;
+    }>).map((session) => ({
+      id: session.id,
+      chatId: session.chatId,
+      phoneNumber: session.phoneNumber,
+      createdAt: session.createdAt,
+      updatedAt: session.updatedAt
+    }));
+  }
+
+  async reactivateSession(chatId: string): Promise<void> {
+    await this.client.mutation(convexApi.conversations.updateSessionStatus, {
+      chatId,
+      status: "active"
     });
   }
 }

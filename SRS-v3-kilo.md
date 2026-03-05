@@ -1,7 +1,7 @@
 # SRS v3 - Sistema de Asistente Conversacional para Restaurantes
 ## MVP Definitivo - Workflow End-to-End
 
-**Versión:** 3.0  
+**Versión:** 3.8 
 **Fecha:** 2026-03-02  
 **Estado:** MVP Definitivo para Implementación
 
@@ -655,8 +655,15 @@ Si las variables de entorno están configuradas:
 │  - Tokens: "150 tokens de input, 15 de output"                              │
 │  - Costo estimado por conversación                                          │
 │  - Trazas completas del flujo LangGraph                                     │
+│  - Entorno por traza (`langfuse.environment`: `dev` | `prod` | `judge`)     │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
+
+Convención vigente de tags para trazas del judge:
+- `ai-judge`
+- `category:<categoria>`
+
+El tag `judge-agent` queda deprecado y no debe usarse.
 
 ---
 
@@ -763,6 +770,7 @@ Si las variables de entorno están configuradas:
 |----|---------------|---------------|
 | RNF-013 | Trazas en Langfuse (si está configurado) | Restricción del Producto |
 | RNF-014 | Métricas de latencia y tokens visibles | Restricción del Producto |
+| RNF-015 | Cada traza debe incluir `langfuse.environment` con valores `dev`, `prod` o `judge` según resolución por request | Restricción del Producto |
 
 ---
 
@@ -971,13 +979,212 @@ export default defineSchema({
 
 ---
 
-## 16. Control de Versiones
+## 16. Hardening de Producción (2026-03-04)
+
+### 16.1 Resumen de Mejoras
+
+Se implementó un conjunto completo de mejoras de seguridad, resiliencia y observabilidad para preparar el sistema para producción:
+
+| Categoría | Componentes | Estado |
+|-----------|-------------|--------|
+| Seguridad | JWT Auth, CORS, Helmet, Rate Limiting, Signature Validation | ✅ Implementado |
+| Resiliencia | Circuit Breakers, Graceful Degradation | ✅ Implementado |
+| Observabilidad | Langfuse Tracing, Structured Logging | ✅ Implementado |
+| Operaciones | Graceful Shutdown, Health Checks | ✅ Implementado |
+
+### 16.2 Detalle de Componentes de Seguridad
+
+#### SEC-1: Validación de Firma de Telegram
+- **Archivo:** `src/routes/telegram-webhook.ts`
+- **Propósito:** Validar que las peticiones provienen realmente de Telegram
+- **Implementación:** Comparación timing-safe del header `X-Telegram-Bot-Api-Secret-Token`
+- **Corrección aplicada:** Se corrigió el uso de `??` por `||` en la comparación timing-safe porque `charCodeAt()` retorna `NaN` (no `undefined`) para índices fuera de rango. El operador `??` no detecta `NaN`, mientras que `||` sí lo convierte a `0`.
+
+```typescript
+// Antes (bug):
+result |= (a.charCodeAt(i) ?? 0) ^ (b.charCodeAt(i) ?? 0);
+
+// Después (corregido):
+result |= (a.charCodeAt(i) || 0) ^ (b.charCodeAt(i) || 0);
+```
+
+#### SEC-2: CORS Configurable
+- **Archivo:** `src/middleware/cors.ts`
+- **Propósito:** Prevenir acceso no autorizado desde orígenes no permitidos
+- **Configuración:** Variable de entorno `ALLOWED_ORIGINS` (lista separada por comas)
+- **Comportamiento:** En producción, rechaza todas las peticiones si no hay orígenes configurados
+
+#### SEC-3: Rate Limiting
+- **Archivo:** `src/middleware/rate-limiter.ts`
+- **Propósito:** Proteger contra ataques de fuerza bruta
+- **Limitadores pre-configurados:**
+  - `authRateLimiter`: 10 req/min por IP, bloqueo de 15 min
+  - `telegramRateLimiter`: 60 req/min por chat ID
+  - `apiRateLimiter`: 100 req/min por IP
+
+**Limitación conocida:** El store en memoria no coordina entre múltiples instancias. Para deployments con múltiples instancias, considerar:
+1. Redis-based distributed rate limiter
+2. Sticky sessions en el load balancer
+3. Single instance con auto-scaling groups
+
+#### SEC-5: JWT con Token Revocation
+- **Archivo:** `src/middleware/jwt-auth.ts`
+- **Propósito:** Autenticación de rutas admin con soporte para revocación de tokens
+- **Mejora aplicada:** Se agregó cache local al `ConvexTokenVersionStore` para manejar fallas de Convex. Durante una interrupción de Convex, el cache local preserva la versión más alta conocida de cada usuario, evitando que tokens revocados sean aceptados.
+
+```typescript
+// Antes: Retornaba 0 en error (aceptaba todos los tokens durante outage)
+async getVersion(userId: string): Promise<number> {
+  try {
+    return await this.convex.query(...);
+  } catch (error) {
+    return 0; // ❌ Problemático
+  }
+}
+
+// Después: Usa cache local como fallback
+async getVersion(userId: string): Promise<number> {
+  try {
+    const version = await this.convex.query(...);
+    this.localCache.set(userId, version); // Actualiza cache
+    return version;
+  } catch (error) {
+    return this.localCache.get(userId) ?? 0; // ✅ Respeta revocaciones previas
+  }
+}
+```
+
+### 16.3 Componentes de Resiliencia
+
+#### Circuit Breakers
+- **Archivo:** `src/resilience/circuit-breaker.ts`
+- **Propósito:** Prevenir fallos en cascada cuando servicios externos no están disponibles
+- **Instancias configuradas:**
+  - `GeminiCircuitBreaker`: Threshold de 5 fallos, reset de 30s
+  - `ConvexCircuitBreaker`: Threshold de 3 fallos, reset de 15s
+
+#### Graceful Degradation
+- **Archivo:** `src/resilience/graceful-degradation.ts`
+- **Propósito:** Proporcionar respuestas de fallback cuando servicios están degradados
+- **Respuestas de fallback:** Mensajes en español para FAQs, pedidos, y errores generales
+
+### 16.4 Observabilidad
+
+#### Langfuse Tracing Mejorado
+- **Archivo:** `src/services/langfuse.ts`
+- **Nuevas capacidades:**
+  - `LangfuseTracingService` class con manejo de spans
+  - Trazas para nodos de LangGraph, llamadas LLM, operaciones de BD
+  - Soporte para atributos personalizados y eventos
+
+#### Resolución de Entorno de Tracing por Request (finalizado)
+- **Archivos:** `src/routes/tracing-environment.ts`, `src/routes/message.ts`, `src/routes/telegram-webhook.ts`
+- **Comportamiento implementado:**
+  - `judge`: para flujos AI-as-a-Judge (override explícito del flujo de evaluación).
+  - `dev`: para requests con host local (`localhost`, `127.0.0.1`, `0.0.0.0`, `::1`).
+  - `prod`: para requests con host no local.
+- **Detalle técnico:** el resolver compartido `tracing-environment.ts` calcula el entorno por request y se aplica en ambas rutas de entrada (`/message` y `/telegram/webhook`).
+
+#### Conteo de Tokens y Costos (ajuste 2026-03-04)
+- **Archivos:** `src/services/token-usage.ts`, `src/services/conversation-tracing.ts`, `src/judge/judge-agent.ts`
+- **Problema detectado:** En algunos modelos Gemini, `outputTokens` podia llegar como `0` o con formatos no estandar (ej. wrappers tipo `{intValue: ...}`), subestimando costo en Langfuse.
+- **Mejora aplicada:**
+  - Normalizacion robusta de usage (`input/output/total`) con soporte para campos alternativos y anidados.
+  - Fallback por estimacion de tokens de salida cuando el proveedor no reporta completion tokens.
+  - Acumulacion por traza (no solo ultimo span) para evitar perdida de tokens en flujos multi-nodo.
+  - Atributos OTel/Langfuse saneados para evitar payloads no escalares en metadata.
+  - Hotfix 2026-03-05: `withLlmTracing` ahora infiere texto de salida tambien desde objetos (`output.text`/`output.content`) para poder estimar `outputTokens` cuando el proveedor devuelve `0`.
+  - `token-usage` ahora parsea wrappers OTel stringificados (ej. `"{\"intValue\": 123}"`).
+
+#### AI-as-a-Judge integrado con Langfuse
+- **Archivos:** `src/services/langfuse-evals.ts`, `src/judge/test-runner.ts`, `src/scripts/run-judge-tests.ts`
+- **Capacidades nuevas:**
+  - Upload automatico de scores por test (`judge.overall`, criterios, `judge.pass`).
+  - Provision automatica de `Score Configs` y asociacion por `configId` para estandarizar metricas.
+  - Creacion/actualizacion de Dataset + Dataset Items para la bateria del judge.
+  - Vinculacion de ejecuciones a Dataset Run Items para comparacion de runs en Langfuse.
+  - Flush explicito de telemetry + eval queue al finalizar el runner.
+  - Hotfix 2026-03-05: `score-create` envia siempre `traceId` y usa `observationId` solo cuando hay `traceId` valido.
+  - Se agregaron tests de regresion en `src/services/langfuse-evals.test.ts` para prevenir HTTP 207/400 por payloads invalidos.
+  - Auto-sync de model pricing en Langfuse para modelos custom/no listados, evitando costos vacios cuando hay tokens.
+  - Optimizacion de prompt del judge: elimina duplicacion del ultimo reply, resume instrucciones del sistema y usa FAQ relevante por categoria para bajar tokens/costo.
+  - Limpieza semántica de tags del judge: se conservan solo `ai-judge` y `category:<categoria>`; se elimina el uso del tag `judge-agent`.
+
+#### Trazabilidad E2E en `/message`
+- **Archivos:** `src/services/conversation-assistant.ts`, `src/routes/message.ts`
+- **Mejora aplicada:**
+  - Cada request HTTP ahora retorna `traceId`/`observationId` y `metrics.tokens` cuando el assistant detallado esta disponible.
+  - El grafo principal de conversacion queda instrumentado por nodo con `conversation-tracing`.
+  - Se registra `trace input/output` y manejo de errores con fallback, preservando trazabilidad de degradacion.
+  - El assistant recibe `tracingEnvironment` y lo propaga al servicio de tracing para mantener consistencia de entorno por request.
+
+#### Atributo `langfuse.environment` en spans raíz e hijos
+- **Archivo:** `src/services/conversation-tracing.ts`
+- **Comportamiento implementado:**
+  - Se setea `langfuse.environment` en el span raíz de la conversación.
+  - Se replica `langfuse.environment` en spans hijos para mantener segmentación consistente en toda la traza.
+
+#### Structured Logging
+- **Archivo:** `src/utils/logger.ts`
+- **Características:**
+  - Output JSON en producción, pretty-print en desarrollo
+  - Niveles configurables via `LOG_LEVEL`
+  - Trace ID propagation para correlación de requests
+
+### 16.5 Configuración de Variables de Entorno
+
+Ver `.env.example` para la configuración completa. Variables clave:
+
+| Variable | Propósito | Default |
+|----------|-----------|---------|
+| `TELEGRAM_WEBHOOK_SECRET` | Validación de webhooks | (required in prod) |
+| `JWT_SECRET` | Firma de tokens | (required) |
+| `ALLOWED_ORIGINS` | CORS origins | (required in prod) |
+| `GEMINI_CIRCUIT_FAILURE_THRESHOLD` | Fallos antes de abrir circuito | 5 |
+| `CONVEX_CIRCUIT_FAILURE_THRESHOLD` | Fallos antes de abrir circuito | 3 |
+| `LOG_LEVEL` | Nivel de logging | INFO |
+| `TOKEN_STORE_BACKEND` | Backend para token versions | memory |
+| `LANGFUSE_TRACING_ENVIRONMENT` | Entorno de tracing Langfuse (`auto` para resolver dinámicamente por request) | `auto` |
+| `LANGFUSE_JUDGE_DATASET_NAME` | Nombre del dataset usado por AI Judge en Langfuse | `judge-test-battery` |
+| `LANGFUSE_MODEL_PRICING_MODEL_NAME` | Nombre del modelo para pricing custom en Langfuse | (opcional) |
+| `LANGFUSE_MODEL_PRICING_MATCH_PATTERN` | Regex de matching para aplicar pricing al modelo | `(?i)^(<model>)$` |
+| `LANGFUSE_MODEL_PRICING_UNIT` | Unidad de pricing en Langfuse (`TOKENS`, etc.) | `TOKENS` |
+| `LANGFUSE_MODEL_PRICING_INPUT_PRICE_PER_1M` | Precio de input por 1M tokens (USD) | (opcional) |
+| `LANGFUSE_MODEL_PRICING_OUTPUT_PRICE_PER_1M` | Precio de output por 1M tokens (USD) | (opcional) |
+| `LANGFUSE_MODEL_PRICING_JSON` | Lista JSON de pricing para multiples modelos custom | (opcional) |
+
+### 16.6 Operación de UI Langfuse
+
+Para evitar confusiones en la consola de Langfuse:
+
+- Scores y costos aparecen en `Scores` y en detalle de `Tracing/Observations`.
+- Dataset runs del judge aparecen en `Datasets` (dataset `judge-test-battery` o el configurado).
+- La pantalla `LLM-as-a-Judge` lista Evaluators de Langfuse creados desde UI.
+- Los uploads por API de este proyecto (`scores` + `datasets`) no crean evaluators UI automaticamente; por eso esa vista puede verse vacia aunque haya datos.
+- El runner imprime una guia de navegacion al terminar para ubicar rapido cada artefacto.
+
+### 16.7 Estado de Validación de Implementación
+
+- `npm run build` ✅
+- `npm test` ✅
+
+---
+
+## 17. Control de Versiones
 
 | Versión | Fecha | Autor | Cambios |
 |---------|-------|-------|---------|
 | 1.0 | 2026-02-27 | Equipo | Versión inicial (SRS-v1.md) |
 | 2.0 | 2026-02-28 | Equipo | Plan de construcción progresiva, Fase 0-1 detalladas |
 | 3.0 | 2026-03-02 | Equipo | MVP definitivo: solo efectivo, cálculo de vuelto, whatsapp-cloud-inbox para handoff, workflow end-to-end completo |
+| 3.1 | 2026-03-04 | Equipo | Hardening de producción: seguridad (JWT, CORS, rate limiting), resiliencia (circuit breakers, graceful degradation), observabilidad (tracing, logging estructurado) |
+| 3.2 | 2026-03-04 | Equipo | Langfuse AI quality loop: normalización robusta de tokens/costos, métricas de trazas en `/message`, y upload nativo de scores/dataset-runs para AI-as-a-Judge |
+| 3.3 | 2026-03-05 | Equipo | Hotfix Langfuse Judge: corrección de payloads de `score` (sin `observationId` huérfano), deduplicación de targets y tests de regresión |
+| 3.4 | 2026-03-05 | Equipo | Hotfix de costos/tokens: estimación de `outputTokens` cuando `extractOutput` es objeto, soporte de wrappers OTel stringificados y tests de regresión en tracing/token usage |
+| 3.5 | 2026-03-05 | Equipo | Auto-sincronización de pricing de modelos en Langfuse para habilitar cálculo de costos en modelos custom (ej. gemma) |
+| 3.6 | 2026-03-05 | Equipo | Optimización de prompts del AI Judge: menos contexto redundante y selección de FAQ relevante por categoría para reducir tokens y latencia |
+| 3.7 | 2026-03-05 | Equipo | Estandarización de Score Configs + runbook de navegación UI (explica por qué `LLM-as-a-Judge` puede verse vacío) |
+| 3.8 | 2026-03-05 | Equipo | Alineación SRS con implementación actual: resolver compartido de `tracingEnvironment`, clasificación `dev/prod/judge`, propagación de `langfuse.environment`, tags del judge (`ai-judge` + `category:<categoria>`) y validación build/test |
 
 ---
 

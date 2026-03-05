@@ -28,8 +28,12 @@ function getCategoryDisplayName(category: string): string {
     edge_case: "Edge Cases",
     faq: "FAQ",
     greeting: "Greetings",
+    handoff: "Human Handoff",
     menu: "Menu",
     multi_order: "Multi-Item Orders",
+    payment: "Payment",
+    resilience: "Resilience",
+    security: "Security",
     single_order: "Single Orders",
     workflow: "Workflows"
   };

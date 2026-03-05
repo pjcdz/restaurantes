@@ -1,16 +1,108 @@
 import { type Response, Router } from "express";
+import { createHash, randomBytes } from "crypto";
 
-import { getConvexUrl } from "../config.js";
+import { getConvexUrl, getJwtSecret } from "../config.js";
+import {
+  JwtAuthMiddleware,
+  type AuthenticatedRequest
+} from "../middleware/jwt-auth.js";
+import { authRateLimiter } from "../middleware/rate-limiter.js";
 import {
   ConvexAdminRepository,
-  type CatalogAdminRepository
+  type CatalogAdminRepository,
+  type HandoffAdminRepository,
+  type HandedOffSession
 } from "../services/convex-admin-repository.js";
 
+// ============================================================================
+// CSRF Protection
+// ============================================================================
+
+/**
+ * CSRF token expiration time in milliseconds (1 hour)
+ */
+const CSRF_TOKEN_EXPIRATION_MS = 60 * 60 * 1000;
+
+/**
+ * Generates a CSRF token tied to the user's session.
+ * The token includes a timestamp for expiration checking.
+ *
+ * @param sessionId - Unique identifier for the session (typically user ID from JWT)
+ * @returns CSRF token string in format: timestamp:random:hash
+ */
+function generateCsrfToken(sessionId: string): string {
+  const secret = getJwtSecret();
+  const timestamp = Date.now().toString();
+  const random = randomBytes(16).toString("hex");
+  const data = `${sessionId}:${timestamp}:${random}:${secret}`;
+  const hash = createHash("sha256").update(data).digest("hex");
+  return `${timestamp}:${random}:${hash}`;
+}
+
+/**
+ * Validates a CSRF token against the expected session.
+ *
+ * @param token - The CSRF token to validate (can be unknown from form body)
+ * @param sessionId - The session ID to validate against
+ * @returns true if token is valid and not expired, false otherwise
+ */
+function validateCsrfToken(token: unknown, sessionId: string): boolean {
+  if (typeof token !== "string" || token.trim() === "") {
+    return false;
+  }
+
+  const parts = token.split(":");
+  if (parts.length !== 3) {
+    return false;
+  }
+
+  const [timestampStr, random, providedHash] = parts;
+  const timestamp = parseInt(timestampStr, 10);
+
+  // Check if timestamp is valid
+  if (isNaN(timestamp)) {
+    return false;
+  }
+
+  // Check if token has expired
+  if (Date.now() - timestamp > CSRF_TOKEN_EXPIRATION_MS) {
+    return false;
+  }
+
+  // Regenerate the hash and compare
+  const secret = getJwtSecret();
+  const data = `${sessionId}:${timestampStr}:${random}:${secret}`;
+  const expectedHash = createHash("sha256").update(data).digest("hex");
+
+  // Use timing-safe comparison to prevent timing attacks
+  return timingSafeEquals(providedHash, expectedHash);
+}
+
+/**
+ * Timing-safe string comparison to prevent timing attacks.
+ */
+function timingSafeEquals(a: string, b: string): boolean {
+  if (a.length !== b.length) {
+    return false;
+  }
+
+  let result = 0;
+  for (let i = 0; i < a.length; i++) {
+    result |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  }
+  return result === 0;
+}
+
 export type AdminRouteOptions = {
-  adminRepository?: CatalogAdminRepository;
+  adminRepository?: CatalogAdminRepository & HandoffAdminRepository;
+  /** Skip JWT authentication (for testing purposes only) */
+  skipAuth?: boolean;
+  /** Skip CSRF validation (for testing purposes only) */
+  skipCsrf?: boolean;
 };
 
 type ProductFormBody = {
+  _csrf?: unknown;
   originalItem?: unknown;
   item?: unknown;
   descripcion?: unknown;
@@ -21,6 +113,7 @@ type ProductFormBody = {
 };
 
 type FaqFormBody = {
+  _csrf?: unknown;
   tema?: unknown;
   pregunta?: unknown;
   respuesta?: unknown;
@@ -31,19 +124,53 @@ type AdminFlash = {
   message: string;
 } | null;
 
+/**
+ * Creates the admin router with JWT authentication protection.
+ *
+ * All routes require a valid JWT token with `isAdmin: true` in the payload.
+ * The token should be provided in the Authorization header as `Bearer <token>`.
+ *
+ * @param options - Configuration options including optional repository and auth skip
+ * @returns Configured Express router with protected admin routes
+ *
+ * @example
+ * ```typescript
+ * // Access protected route with JWT
+ * fetch('/admin/data', {
+ *   headers: { 'Authorization': 'Bearer <your-jwt-token>' }
+ * })
+ * ```
+ */
 export function createAdminRouter(options: AdminRouteOptions = {}) {
   const router = Router();
-  const resolveRepository: () => CatalogAdminRepository =
+  const resolveRepository: () => CatalogAdminRepository & HandoffAdminRepository =
     options.adminRepository === undefined
       ? () => new ConvexAdminRepository(getConvexUrl())
-      : () => options.adminRepository as CatalogAdminRepository;
+      : () => options.adminRepository as CatalogAdminRepository & HandoffAdminRepository;
+
+  // SEC-02: JWT Authentication middleware for all admin routes
+  // SEC-3: Rate limiter to protect against brute-force attacks on authentication
+  if (!options.skipAuth) {
+    const authMiddleware = new JwtAuthMiddleware();
+    router.use(authRateLimiter);
+    router.use(authMiddleware.authenticate.bind(authMiddleware));
+  }
+
+  // Helper to check CSRF when not skipped
+  // When skipAuth is true, also skip CSRF for testing convenience
+  const shouldValidateCsrf = !options.skipCsrf && !options.skipAuth;
 
   router.get("/", async (request, response, next) => {
     try {
       const adminData = await resolveRepository().getAdminData();
       const flash = resolveAdminFlash(request.query);
 
-      return response.status(200).send(renderAdminPage(adminData, flash));
+      // Generate CSRF token for the authenticated user
+      const authenticatedReq = request as AuthenticatedRequest;
+      const userId = authenticatedReq.user?.sub ?? "anonymous";
+      const csrfToken = shouldValidateCsrf ? generateCsrfToken(userId) : "test-csrf-token";
+
+      return response.status(200).send(renderAdminPage(adminData, flash, csrfToken));
     } catch (error) {
       return next(error);
     }
@@ -76,7 +203,14 @@ export function createAdminRouter(options: AdminRouteOptions = {}) {
 
   router.post("/products", async (request, response) => {
     try {
+      const authenticatedReq = request as AuthenticatedRequest;
+      const userId = authenticatedReq.user?.sub ?? "anonymous";
       const body = request.body as ProductFormBody;
+
+      // CSRF validation (skip in test mode)
+      if (shouldValidateCsrf && !validateCsrfToken(body._csrf, userId)) {
+        return response.status(403).send("Invalid CSRF token");
+      }
 
       await resolveRepository().upsertCatalogItem({
         originalItem: optionalNullableField(body.originalItem),
@@ -96,7 +230,14 @@ export function createAdminRouter(options: AdminRouteOptions = {}) {
 
   router.post("/products/delete", async (request, response) => {
     try {
+      const authenticatedReq = request as AuthenticatedRequest;
+      const userId = authenticatedReq.user?.sub ?? "anonymous";
       const body = request.body as ProductFormBody;
+
+      // CSRF validation (skip in test mode)
+      if (shouldValidateCsrf && !validateCsrfToken(body._csrf, userId)) {
+        return response.status(403).send("Invalid CSRF token");
+      }
 
       await resolveRepository().deleteCatalogItem(requiredField(body.item));
 
@@ -108,7 +249,14 @@ export function createAdminRouter(options: AdminRouteOptions = {}) {
 
   router.post("/faq", async (request, response) => {
     try {
+      const authenticatedReq = request as AuthenticatedRequest;
+      const userId = authenticatedReq.user?.sub ?? "anonymous";
       const body = request.body as FaqFormBody;
+
+      // CSRF validation (skip in test mode)
+      if (shouldValidateCsrf && !validateCsrfToken(body._csrf, userId)) {
+        return response.status(403).send("Invalid CSRF token");
+      }
 
       await resolveRepository().upsertFaqEntry({
         tema: requiredField(body.tema),
@@ -124,13 +272,51 @@ export function createAdminRouter(options: AdminRouteOptions = {}) {
 
   router.post("/faq/delete", async (request, response) => {
     try {
+      const authenticatedReq = request as AuthenticatedRequest;
+      const userId = authenticatedReq.user?.sub ?? "anonymous";
       const body = request.body as FaqFormBody;
+
+      // CSRF validation (skip in test mode)
+      if (shouldValidateCsrf && !validateCsrfToken(body._csrf, userId)) {
+        return response.status(403).send("Invalid CSRF token");
+      }
 
       await resolveRepository().deleteFaqEntry(requiredField(body.tema));
 
       return redirectToAdmin(response, "success", "FAQ borrada.");
     } catch (_error) {
       return redirectToAdmin(response, "error", "No se pudo borrar la FAQ.");
+    }
+  });
+
+  // Handoff management routes
+  router.get("/handoffs", async (request, response, next) => {
+    try {
+      const sessions = await resolveRepository().getHandedOffSessions();
+
+      return response.status(200).json(sessions);
+    } catch (error) {
+      return next(error);
+    }
+  });
+
+  router.post("/handoffs/:chatId/reactivate", async (request, response, next) => {
+    try {
+      const authenticatedReq = request as AuthenticatedRequest;
+      const userId = authenticatedReq.user?.sub ?? "anonymous";
+      const csrfToken = request.header("X-CSRF-Token");
+
+      if (shouldValidateCsrf && !validateCsrfToken(csrfToken, userId)) {
+        return response.status(403).json({ success: false, message: "Invalid CSRF token" });
+      }
+
+      const chatId = request.params.chatId;
+
+      await resolveRepository().reactivateSession(chatId);
+
+      return response.status(200).json({ success: true, message: "Session reactivated" });
+    } catch (error) {
+      return next(error);
     }
   });
 
@@ -209,7 +395,8 @@ function resolveAdminFlash(query: Record<string, unknown>): AdminFlash {
 
 function renderAdminPage(
   adminData: Awaited<ReturnType<CatalogAdminRepository["getAdminData"]>>,
-  flash: AdminFlash
+  flash: AdminFlash,
+  csrfToken: string
 ): string {
   const productRows = adminData.products
     .map(
@@ -224,6 +411,7 @@ function renderAdminPage(
           <td class="actions">
             <button type="button" class="button-secondary" data-edit-target="product-edit-${index}">Editar</button>
             <form method="post" action="/admin/products/delete" class="inline-form" onsubmit="return confirm('Seguro que quieres borrar este registro?')">
+              <input type="hidden" name="_csrf" value="${escapeHtml(csrfToken)}" />
               <input type="hidden" name="item" value="${escapeHtml(product.item)}" />
               <button type="submit" class="button-danger">Borrar</button>
             </form>
@@ -232,6 +420,7 @@ function renderAdminPage(
         <tr id="product-edit-${index}" class="editor-row" hidden>
           <td colspan="7">
             <form method="post" action="/admin/products" class="row-editor">
+              <input type="hidden" name="_csrf" value="${escapeHtml(csrfToken)}" />
               <input type="hidden" name="originalItem" value="${escapeHtml(product.item)}" />
               <label>Nombre del item<input name="item" value="${escapeHtml(product.item)}" required /></label>
               <label>Descripcion<textarea name="descripcion" required>${escapeHtml(product.descripcion)}</textarea></label>
@@ -258,6 +447,7 @@ function renderAdminPage(
           <td class="actions">
             <button type="button" class="button-secondary" data-edit-target="faq-edit-${index}">Editar</button>
             <form method="post" action="/admin/faq/delete" class="inline-form" onsubmit="return confirm('Seguro que quieres borrar este registro?')">
+              <input type="hidden" name="_csrf" value="${escapeHtml(csrfToken)}" />
               <input type="hidden" name="tema" value="${escapeHtml(entry.tema)}" />
               <button type="submit" class="button-danger">Borrar</button>
             </form>
@@ -266,6 +456,7 @@ function renderAdminPage(
         <tr id="faq-edit-${index}" class="editor-row" hidden>
           <td colspan="4">
             <form method="post" action="/admin/faq" class="row-editor">
+              <input type="hidden" name="_csrf" value="${escapeHtml(csrfToken)}" />
               <label>Tema<input name="tema" value="${escapeHtml(entry.tema)}" required /></label>
               <label>Keywords o pregunta<textarea name="pregunta" required>${escapeHtml(entry.pregunta)}</textarea></label>
               <label>Respuesta<textarea name="respuesta" required>${escapeHtml(entry.respuesta)}</textarea></label>
@@ -450,6 +641,7 @@ function renderAdminPage(
             <h3>Agregar producto</h3>
           </div>
           <form method="post" action="/admin/products">
+            <input type="hidden" name="_csrf" value="${escapeHtml(csrfToken)}" />
             <input type="hidden" name="originalItem" value="" />
             <label>Nombre del item<input name="item" required /></label>
             <label>Descripcion<textarea name="descripcion" required></textarea></label>
@@ -477,16 +669,106 @@ function renderAdminPage(
             <h3>Agregar FAQ</h3>
           </div>
           <form method="post" action="/admin/faq">
+            <input type="hidden" name="_csrf" value="${escapeHtml(csrfToken)}" />
             <label>Tema<input name="tema" required /></label>
             <label>Keywords o pregunta<textarea name="pregunta" required></textarea></label>
             <label>Respuesta<textarea name="respuesta" required></textarea></label>
             <button type="submit">Agregar FAQ</button>
-          </form>
-        </section>
-      </div>
-    </main>
-    <script>
-      function closeAllEditors() {
+            </form>
+          </section>
+          <section class="card" id="handoffs-section">
+            <h2>Conversaciones Derivadas</h2>
+            <p class="hint">Conversaciones donde la IA fue desactivada para atencion humana.</p>
+            <table>
+              <thead>
+                <tr>
+                  <th>Chat ID</th>
+                  <th>Telefono</th>
+                  <th>Derivado</th>
+                  <th>Acciones</th>
+                </tr>
+              </thead>
+              <tbody id="handoffs-tbody">
+                <tr id="handoffs-loading">
+                  <td colspan="4" style="text-align: center;">Cargando...</td>
+                </tr>
+              </tbody>
+            </table>
+          </section>
+        </div>
+      </main>
+      <script>
+        const csrfToken = "${escapeHtml(csrfToken)}";
+
+        // Handoffs management
+        async function loadHandoffs() {
+          const tbody = document.getElementById("handoffs-tbody");
+          if (!tbody) return;
+  
+          try {
+            const response = await fetch("/admin/handoffs");
+            if (!response.ok) throw new Error("Failed to load handoffs");
+            const sessions = await response.json();
+  
+            if (sessions.length === 0) {
+              tbody.innerHTML = '<tr><td colspan="4" style="text-align: center; color: #6f5c47;">No hay conversaciones derivadas</td></tr>';
+              return;
+            }
+  
+            tbody.innerHTML = sessions.map(session => {
+              const date = new Date(session.updatedAt);
+              const formattedDate = date.toLocaleString("es-AR", {
+                day: "2-digit",
+                month: "2-digit",
+                year: "numeric",
+                hour: "2-digit",
+                minute: "2-digit"
+              });
+              return '<tr>' +
+                '<td><code>' + escapeHtml(session.chatId) + '</code></td>' +
+                '<td>' + (session.phoneNumber ? escapeHtml(session.phoneNumber) : '-') + '</td>' +
+                '<td>' + formattedDate + '</td>' +
+                '<td class="actions">' +
+                  '<button type="button" class="button-secondary" onclick="reactivateSession(\\'' + escapeHtml(session.chatId) + '\\')">Reactivar IA</button>' +
+                '</td>' +
+              '</tr>';
+            }).join("");
+          } catch (error) {
+            tbody.innerHTML = '<tr><td colspan="4" style="text-align: center; color: #8a2f24;">Error al cargar conversaciones derivadas</td></tr>';
+          }
+        }
+  
+        async function reactivateSession(chatId) {
+          if (!confirm("Seguro que quieres reactivar la IA para esta conversacion?")) return;
+  
+          try {
+            const response = await fetch("/admin/handoffs/" + encodeURIComponent(chatId) + "/reactivate", {
+              method: "POST",
+              headers: {
+                "X-CSRF-Token": csrfToken
+              }
+            });
+            if (!response.ok) throw new Error("Failed to reactivate");
+            await loadHandoffs();
+          } catch (error) {
+            alert("Error al reactivar la conversacion");
+          }
+        }
+  
+        function escapeHtml(value) {
+          return String(value)
+            .replaceAll("&", "&amp;")
+            .replaceAll("<", "&lt;")
+            .replaceAll(">", "&gt;")
+            .replaceAll("\"", "&quot;")
+            .replaceAll("'", "&#39;");
+        }
+  
+        // Load handoffs on page load
+        loadHandoffs();
+  
+        // Existing editor functionality
+        function closeAllEditors() {
         for (const row of document.querySelectorAll(".editor-row")) {
           if (row instanceof HTMLTableRowElement) {
             row.hidden = true;

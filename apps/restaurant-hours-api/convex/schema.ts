@@ -12,7 +12,9 @@ export default defineSchema({
       v.literal("handed_off"),
       v.literal("paused")
     )
-  }).index("by_chatId", ["chatId"]),
+  })
+    .index("by_chatId", ["chatId"])
+    .index("by_status", ["status"]),
   checkpoints: defineTable({
     sessionId: v.id("sessions"),
     threadId: v.string(),
@@ -39,6 +41,8 @@ export default defineSchema({
       v.literal("error_producto"),
       v.literal("incompleto")
     ),
+    paymentAmount: v.optional(v.number()),
+    change: v.optional(v.number()),
     createdAt: v.number(),
     updatedAt: v.number()
   })
@@ -62,5 +66,10 @@ export default defineSchema({
     tema: v.string(),
     pregunta: v.string(),
     respuesta: v.string()
-  }).index("by_tema", ["tema"])
+  }).index("by_tema", ["tema"]),
+  tokenVersions: defineTable({
+    userId: v.string(),
+    version: v.number(),
+    updatedAt: v.number()
+  }).index("by_userId", ["userId"])
 });

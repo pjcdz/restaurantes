@@ -7,8 +7,12 @@ export type TestCategory =
   | "edge_case"
   | "faq"
   | "greeting"
+  | "handoff"
   | "menu"
   | "multi_order"
+  | "payment"
+  | "resilience"
+  | "security"
   | "single_order"
   | "workflow";
 
@@ -69,6 +73,10 @@ export type TestResult = {
   passed: boolean;
   actualResponses: Array<string>;
   judgeEvaluation: JudgeEvaluation;
+  sutTraceId?: string;
+  sutObservationId?: string;
+  judgeTraceId?: string;
+  judgeObservationId?: string;
   sutTokens: TokenUsage;
   judgeTokens: TokenUsage;
   sutTiming: TimingMetrics;
@@ -122,7 +130,7 @@ export type JudgeState = {
  * System Under Test - the conversation assistant
  */
 export type SystemUnderTest = {
-  sendMessage(chatId: string, message: string): Promise<{ reply: string; tokens: TokenUsage; timing: TimingMetrics }>;
+  sendMessage(chatId: string, message: string): Promise<{ reply: string; tokens: TokenUsage; timing: TimingMetrics; traceId?: string; observationId?: string }>;
   getCatalog(): Promise<CatalogSnapshot>;
 };
 
@@ -134,7 +142,8 @@ export type JudgeAgent = {
     question: string;
     response: string;
     catalog: CatalogSnapshot;
-  }): Promise<{ evaluation: JudgeEvaluation; tokens: TokenUsage; timing: TimingMetrics }>;
+    category?: TestCategory;
+  }): Promise<{ evaluation: JudgeEvaluation; tokens: TokenUsage; timing: TimingMetrics; traceId?: string; observationId?: string }>;
 };
 
 /**
