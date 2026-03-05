@@ -19,15 +19,15 @@ describe("resolvePort", () => {
 });
 
 describe("server startup", () => {
-  it("loads TELEGRAM_BOT_TOKEN from a local .env file", async () => {
+  it("loads TELEGRAM_BOT_TOKEN from .env.local", async () => {
     const originalCwd = process.cwd();
     const originalToken = process.env.TELEGRAM_BOT_TOKEN;
     const tempDir = mkdtempSync(join(tmpdir(), "restaurant-hours-api-"));
 
     try {
       writeFileSync(
-        join(tempDir, ".env"),
-        "TELEGRAM_BOT_TOKEN=test-from-dotenv\n",
+        join(tempDir, ".env.local"),
+        "TELEGRAM_BOT_TOKEN=test-from-dotenv-local\n",
         "utf8"
       );
       delete process.env.TELEGRAM_BOT_TOKEN;
@@ -37,7 +37,39 @@ describe("server startup", () => {
         `${pathToFileURL(resolve(originalCwd, "src/server.ts")).href}?test=${Date.now()}`
       );
 
-      expect(getTelegramBotToken()).toBe("test-from-dotenv");
+      expect(getTelegramBotToken()).toBe("test-from-dotenv-local");
+    } finally {
+      process.chdir(originalCwd);
+
+      if (originalToken === undefined) {
+        delete process.env.TELEGRAM_BOT_TOKEN;
+      } else {
+        process.env.TELEGRAM_BOT_TOKEN = originalToken;
+      }
+
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not overwrite TELEGRAM_BOT_TOKEN when already set in process.env", async () => {
+    const originalCwd = process.cwd();
+    const originalToken = process.env.TELEGRAM_BOT_TOKEN;
+    const tempDir = mkdtempSync(join(tmpdir(), "restaurant-hours-api-"));
+
+    try {
+      writeFileSync(
+        join(tempDir, ".env.local"),
+        "TELEGRAM_BOT_TOKEN=test-from-dotenv-local\n",
+        "utf8"
+      );
+      process.env.TELEGRAM_BOT_TOKEN = "already-set-in-process";
+      process.chdir(tempDir);
+
+      await import(
+        `${pathToFileURL(resolve(originalCwd, "src/server.ts")).href}?test=${Date.now()}`
+      );
+
+      expect(getTelegramBotToken()).toBe("already-set-in-process");
     } finally {
       process.chdir(originalCwd);
 

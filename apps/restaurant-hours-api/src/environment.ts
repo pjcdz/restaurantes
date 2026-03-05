@@ -2,9 +2,11 @@ import { existsSync, readFileSync } from "node:fs";
 import { resolve as resolvePath } from "node:path";
 
 export function loadEnvironmentFile() {
-  const environmentFilePath = resolvePath(process.cwd(), ".env");
+  const environmentFilePath = [".env.local", ".env"]
+    .map((fileName) => resolvePath(process.cwd(), fileName))
+    .find((filePath) => existsSync(filePath));
 
-  if (!existsSync(environmentFilePath)) {
+  if (!environmentFilePath) {
     return;
   }
 

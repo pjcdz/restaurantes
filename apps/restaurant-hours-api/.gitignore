@@ -3,3 +3,8 @@ node_modules
 .env
 
 .env.local
+
+# Convex source files should remain TypeScript in convex/ root.
+# Prevent accidental compiled artifacts from causing bundling path collisions.
+convex/*.js
+convex/*.js.map

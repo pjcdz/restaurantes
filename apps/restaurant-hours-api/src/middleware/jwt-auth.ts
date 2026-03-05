@@ -2,7 +2,6 @@ import { type NextFunction, type Request, type Response } from "express";
 import jwt, { type JwtPayload } from "jsonwebtoken";
 import { ConvexHttpClient } from "convex/browser";
 import { anyApi } from "convex/server";
-import { api } from "../../convex/_generated/api.js";
 
 import { getJwtSecret } from "../config.js";
 import { Logger } from "../utils/logger.js";
@@ -100,7 +99,7 @@ export class ConvexTokenVersionStore implements TokenVersionStore {
 
   async getVersion(userId: string): Promise<number> {
     try {
-      const version = await this.convex.query(api.tokenVersions.getTokenVersion, { userId });
+      const version = await this.convex.query(convexApi.tokenVersions.getTokenVersion, { userId });
       // Update local cache with the latest version from Convex
       const cachedVersion = this.localCache.get(userId);
       if (cachedVersion === undefined || version > cachedVersion) {
