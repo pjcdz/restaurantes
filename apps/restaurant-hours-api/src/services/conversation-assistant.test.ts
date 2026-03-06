@@ -492,6 +492,63 @@ describe("createConversationAssistant", () => {
     ]);
   });
 
+  it("continues pickup workflow when user says para retirar", async () => {
+    const { repository, state } = createMemoryRepository({
+      prices: [
+        {
+          producto: "Bacon King",
+          precioUnitario: 11200,
+          aliases: ["bacon", "bacon king", "bk"]
+        }
+      ]
+    });
+    const assistant = createConversationAssistant({
+      repository,
+      composeResponse: async (input) => input.draftReply
+    });
+
+    const firstReply = await assistant.handleIncomingMessage({
+      chatId: "777",
+      text: "Mandame dos bacon king"
+    });
+    const secondReply = await assistant.handleIncomingMessage({
+      chatId: "777",
+      text: "Para retirar"
+    });
+    const thirdReply = await assistant.handleIncomingMessage({
+      chatId: "777",
+      text: "Te pago con efectivo"
+    });
+    const fourthReply = await assistant.handleIncomingMessage({
+      chatId: "777",
+      text: "Soy Maria"
+    });
+
+    expect(firstReply).toContain("$22400");
+    expect(firstReply).toContain("¿Es para delivery o retiro?");
+    expect(secondReply).toBe(
+      "¿Como queres pagar? (efectivo/tarjeta/transferencia/mercado pago)"
+    );
+    expect(thirdReply).toBe("¿A nombre de quien dejamos el pedido?");
+    expect(fourthReply).toBe("El total es $22400. ¿Con cuanto vas a pagar?");
+    expect(state.orders).toEqual([
+      expect.objectContaining({
+        tipoEntrega: "pickup",
+        metodoPago: "efectivo",
+        nombreCliente: "maria",
+        total: 22400,
+        estado: "incompleto",
+        items: [
+          {
+            producto: "Bacon King",
+            cantidad: 2,
+            precioUnitario: 11200
+          }
+        ]
+      })
+    ]);
+  });
+
   it("adds multiple items from a single structured extraction", async () => {
     const { repository, state } = createMemoryRepository({
       prices: [

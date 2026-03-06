@@ -945,6 +945,7 @@ function isOrderFollowUpMessage(
       "delivery",
       "envio",
       "retiro",
+      "retirar",
       "pickup",
       "paso a buscar",
       "efectivo",
@@ -1255,7 +1256,7 @@ function updateOrderDraftWithMessage(
     orderDraft.tipoEntrega = "delivery";
   }
 
-  if (includesAny(normalizedText, ["retiro", "pickup", "paso a buscar"])) {
+  if (includesAny(normalizedText, ["retiro", "retirar", "pickup", "paso a buscar"])) {
     orderDraft.tipoEntrega = "pickup";
   }
 
@@ -1358,6 +1359,7 @@ function looksLikeNameOnlyMessage(normalizedText: string): boolean {
       "delivery",
       "envio",
       "retiro",
+      "retirar",
       "pickup",
       "paso a buscar",
       "efectivo",
