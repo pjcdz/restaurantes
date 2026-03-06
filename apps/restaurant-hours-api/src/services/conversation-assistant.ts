@@ -791,9 +791,18 @@ function buildOrderReply(input: {
       (updatedItem?.cantidad ?? line.quantity) > line.quantity;
 
     if (shouldShowAccumulatedTotal) {
-      segments.push(
-        `Anotado: ${line.quantity} ${line.matchedProduct} ($${line.subtotal}). Total parcial: $${input.orderDraft.total}.`
-      );
+      const accumulatedQuantity = updatedItem?.cantidad ?? line.quantity;
+      const isIncrementOnExistingItem = accumulatedQuantity > line.quantity;
+
+      if (isIncrementOnExistingItem) {
+        segments.push(
+          `Anotado: +${line.quantity} ${line.matchedProduct}. Ahora llevas ${accumulatedQuantity} ${line.matchedProduct}. Total parcial: $${input.orderDraft.total}.`
+        );
+      } else {
+        segments.push(
+          `Anotado: ${line.quantity} ${line.matchedProduct} ($${line.subtotal}). Total parcial: $${input.orderDraft.total}.`
+        );
+      }
     } else {
       segments.push(
         `Anotado: ${line.quantity} ${line.requestedProduct} ($${line.precioUnitario} c/u = $${line.subtotal}).`

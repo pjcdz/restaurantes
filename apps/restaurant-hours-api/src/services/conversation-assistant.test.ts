@@ -683,7 +683,7 @@ describe("createConversationAssistant", () => {
     });
 
     expect(reply).toBe(
-      "Anotado: 1 La Clásica Smash ($8500). Total parcial: $17000. ¿Es para delivery o retiro?"
+      "Anotado: +1 La Clásica Smash. Ahora llevas 2 La Clásica Smash. Total parcial: $17000. ¿Es para delivery o retiro?"
     );
     expect(state.orders).toEqual([
       expect.objectContaining({
