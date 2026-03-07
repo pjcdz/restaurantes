@@ -20,6 +20,11 @@ const checkpointValidator = v.object({
   sessionId: v.id("sessions"),
   threadId: v.string(),
   checkpoint: v.string(),
+  ts: v.string(),
+  versions: v.optional(v.string()),
+  versionsSeen: v.optional(v.string()),
+  metadata: v.optional(v.string()),
+  namespace: v.string(),
   createdAt: v.number()
 });
 
@@ -39,6 +44,7 @@ const pedidoValidator = v.object({
   metodoPago: v.union(v.string(), v.null()),
   nombreCliente: v.union(v.string(), v.null()),
   total: v.number(),
+  montoAbono: v.union(v.number(), v.null()),
   estado: v.union(
     v.literal("completo"),
     v.literal("error_producto"),
@@ -94,7 +100,6 @@ export const upsertSessionByChatId = mutation({
 
     if (existing) {
       await ctx.db.patch(existing._id, {
-        status: "active",
         updatedAt: now
       });
 
@@ -104,7 +109,7 @@ export const upsertSessionByChatId = mutation({
         phoneNumber: existing.phoneNumber,
         createdAt: existing.createdAt,
         updatedAt: now,
-        status: "active" as const
+        status: existing.status
       };
     }
 
@@ -149,6 +154,11 @@ export const getLatestCheckpointBySessionId = query({
       sessionId: checkpoint.sessionId,
       threadId: checkpoint.threadId,
       checkpoint: checkpoint.checkpoint,
+      ts: checkpoint.ts,
+      versions: checkpoint.versions,
+      versionsSeen: checkpoint.versionsSeen,
+      metadata: checkpoint.metadata,
+      namespace: checkpoint.namespace,
       createdAt: checkpoint.createdAt
     };
   }
@@ -159,14 +169,26 @@ export const saveCheckpoint = mutation({
     sessionId: v.id("sessions"),
     threadId: v.string(),
     checkpoint: v.string(),
-    createdAt: v.number()
+    createdAt: v.number(),
+    ts: v.optional(v.string()),
+    versions: v.optional(v.string()),
+    versionsSeen: v.optional(v.string()),
+    metadata: v.optional(v.string()),
+    namespace: v.optional(v.string())
   },
   returns: checkpointValidator,
   handler: async (ctx, args) => {
+    const ts = args.ts ?? new Date(args.createdAt).toISOString();
+    const namespace = args.namespace ?? "restaulang-main";
     const id = await ctx.db.insert("checkpoints", {
       sessionId: args.sessionId,
       threadId: args.threadId,
       checkpoint: args.checkpoint,
+      ts,
+      versions: args.versions,
+      versionsSeen: args.versionsSeen,
+      metadata: args.metadata,
+      namespace,
       createdAt: args.createdAt
     });
 
@@ -175,6 +197,11 @@ export const saveCheckpoint = mutation({
       sessionId: args.sessionId,
       threadId: args.threadId,
       checkpoint: args.checkpoint,
+      ts,
+      versions: args.versions,
+      versionsSeen: args.versionsSeen,
+      metadata: args.metadata,
+      namespace,
       createdAt: args.createdAt
     };
   }
@@ -190,6 +217,7 @@ export const upsertPedidoForSession = mutation({
     metodoPago: v.union(v.string(), v.null()),
     nombreCliente: v.union(v.string(), v.null()),
     total: v.number(),
+    montoAbono: v.union(v.number(), v.null()),
     estado: v.union(
       v.literal("completo"),
       v.literal("error_producto"),
@@ -213,6 +241,7 @@ export const upsertPedidoForSession = mutation({
         metodoPago: args.metodoPago,
         nombreCliente: args.nombreCliente,
         total: args.total,
+        montoAbono: args.montoAbono ?? undefined,
         estado: args.estado,
         updatedAt: now
       });
@@ -227,6 +256,7 @@ export const upsertPedidoForSession = mutation({
         metodoPago: args.metodoPago,
         nombreCliente: args.nombreCliente,
         total: args.total,
+        montoAbono: args.montoAbono ?? null,
         estado: args.estado,
         createdAt: existing.createdAt,
         updatedAt: now
@@ -242,6 +272,7 @@ export const upsertPedidoForSession = mutation({
       metodoPago: args.metodoPago,
       nombreCliente: args.nombreCliente,
       total: args.total,
+      montoAbono: args.montoAbono ?? undefined,
       estado: args.estado,
       createdAt: now,
       updatedAt: now
@@ -257,6 +288,7 @@ export const upsertPedidoForSession = mutation({
       metodoPago: args.metodoPago,
       nombreCliente: args.nombreCliente,
       total: args.total,
+      montoAbono: args.montoAbono ?? null,
       estado: args.estado,
       createdAt: now,
       updatedAt: now

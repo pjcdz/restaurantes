@@ -22,35 +22,27 @@ export interface PaymentHandlerState {
   paymentConfirmed: boolean;
 }
 
+export interface PaymentConfig {
+  metodos: string[];
+  efectivoMinimo: number;
+  transferenciaBanco: string;
+  transferenciaAlias: string;
+  transferenciaCBU: string;
+  transferenciaCUIT?: string;
+  entregaPago: "con_entrega" | "adelantado";
+}
+
+const PAYMENT_AMOUNT_REGEX = /^(?:\$?\s*)?(\d+(?:\.\d+)?)(?:\s*(?:pesos|ars|\$))?$/u;
+const PAYMENT_PREFIX_REGEX = /(?:con|pago|tengo|son|abono|vengo)\s+(\d+(?:\.\d+)?)/u;
+
 /**
  * Detecta si el mensaje del usuario es sobre pagos
  */
 export function detectPaymentIntent(messageText: string): PaymentIntent {
   const normalizedText = messageText.toLowerCase().trim();
 
-  // Detección de consultas sobre métodos de pago
-  const paymentMethodsKeywords = [
-    "como pago",
-    "formas de pago",
-    "métodos de pago",
-    "qué aceptan",
-    "pago",
-    "pagar",
-    "mercado pago",
-    "mercadopago",
-    "transferencia",
-    "efectivo",
-    "tarjeta",
-    "dinero",
-    "dinero en efectivo"
-  ];
-
-  if (paymentMethodsKeywords.some(keyword => normalizedText.includes(keyword))) {
-    return "payment_methods";
-  }
-
-  // Detección de monto de pago
-  if (/^\s*\$?\s*(\d+(?:\.\d+)?)(?:\s*(?:pesos|ars)?\s*$/.test(normalizedText)) {
+  // Detección de monto de pago (número simple o prefijo "con/pago/tengo")
+  if (PAYMENT_AMOUNT_REGEX.test(normalizedText) || PAYMENT_PREFIX_REGEX.test(normalizedText)) {
     return "payment_amount";
   }
 
@@ -86,6 +78,29 @@ export function detectPaymentIntent(messageText: string): PaymentIntent {
     return "payment_question";
   }
 
+  // Detección de consultas sobre métodos de pago
+  const paymentMethodsKeywords = [
+    "como pago",
+    "formas de pago",
+    "metodos de pago",
+    "métodos de pago",
+    "que aceptan",
+    "qué aceptan",
+    "medios de pago",
+    "aceptan transferencia",
+    "aceptan efectivo",
+    "aceptan tarjeta",
+    "mercado pago",
+    "mercadopago",
+    "transferencia",
+    "efectivo",
+    "tarjeta"
+  ];
+
+  if (paymentMethodsKeywords.some(keyword => normalizedText.includes(keyword))) {
+    return "payment_methods";
+  }
+
   return null;
 }
 
@@ -96,7 +111,7 @@ export function generatePaymentMethodsResponse(config: {
   metodos: string[];
   efectivoMinimo: number;
   transferenciaBanco: string;
-  transferenciaAlias: v.string();
+  transferenciaAlias: string;
   transferenciaCBU: string;
   transferenciaCUIT?: string;
   entregaPago: string;
@@ -202,7 +217,7 @@ export function generateOrderConfirmationResponse(
     .map(item => `${item.cantidad} ${item.producto}`)
     .join(", ");
 
-  segments.push("📋 **Resumen de tu pedido:**\n");
+  segments.push("📋 Resumen de tu pedido:\n");
   segments.push(`   Items: ${itemsSummary}\n`);
   segments.push(`   Total: $${orderDraft.total}\n`);
 
@@ -229,7 +244,7 @@ export function generateOrderConfirmationResponse(
     segments.push("   Debes enviar la transferencia antes de la entrega del pedido.\n");
   }
 
-  segments.push("\n✅ **¿Confirmas el pedido?**\n");
+  segments.push("\n✅ ¿Confirmas el pedido?\n");
   segments.push("Responde 'Sí, confirmo' para proceder.");
 
   return segments.join("");
@@ -245,7 +260,7 @@ export function validatePaymentAmount(
   if (paymentAmount < orderTotal) {
     return {
       valid: false,
-      error: `El monto ingresado ($${paymentAmount}) es menor al total del pedido ($${orderTotal}).`
+      error: `El monto ingresado (${paymentAmount}) es menor al total del pedido (${orderTotal}).`
     };
   }
 
@@ -253,11 +268,7 @@ export function validatePaymentAmount(
     return { valid: true };
   }
 
-  const change = paymentAmount - orderTotal;
-  return {
-    valid: true,
-    error: undefined
-  };
+  return { valid: true };
 }
 
 /**
@@ -267,18 +278,14 @@ export function extractPaymentAmount(messageText: string): number | null {
   const normalizedText = messageText.toLowerCase().trim();
 
   // Patrón: "con X", "pago X", "tengo X", "son X", "abono X"
-  const withPrefixMatch = normalizedText.match(
-    /(?:con|pago|tengo|son|abono|vengo)\s+(\d+(?:\.\d+)?)/
-  );
+  const withPrefixMatch = normalizedText.match(PAYMENT_PREFIX_REGEX);
 
   if (withPrefixMatch?.[1]) {
     return parseFloat(withPrefixMatch[1]);
   }
 
   // Patrón: Just a number (si el mensaje es lo suficientemente simple)
-  const simpleNumberMatch = normalizedText.match(
-    /^\s*\$?\s*(\d+(?:\.\d+)?)(?:\s*(?:pesos|ars|\$)?)?\s*$/
-  );
+  const simpleNumberMatch = normalizedText.match(PAYMENT_AMOUNT_REGEX);
 
   if (simpleNumberMatch?.[1]) {
     return parseFloat(simpleNumberMatch[1]);

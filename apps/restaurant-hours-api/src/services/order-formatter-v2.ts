@@ -1,413 +1,283 @@
 /**
  * Order Formatter V2 - SRS v4
  *
- * Este módulo implementa el formateo de respuestas de pedidos
- * con mejoras del Sprint 1: resumen de carrito, acciones, y profesionalización.
+ * Helpers para formatear respuestas transaccionales de pedidos.
  */
 
 import type { ConversationOrderDraft } from "./conversation-assistant.js";
 
-/**
- * SRS v4: Tipo extendido de order draft con soporte de carrito
- */
 export type ConversationOrderDraftV2 = ConversationOrderDraft & {
   cartAction?: "add" | "remove" | "replace" | "clear";
-  previousCart?: Array<any>;
+  previousCart?: Array<unknown>;
 };
 
-/**
- * SRS v4: Genera un resumen del carrito con las mejoras del Sprint 1.
- * Muestra los items, subtotales, y el total acumulado de forma clara.
- */
+type PaymentConfigLite = {
+  metodos: string[];
+  efectivoMinimo?: number;
+  transferenciaBanco?: string;
+  transferenciaAlias?: string;
+  transferenciaCBU?: string;
+  transferenciaCUIT?: string;
+  entregaPago?: "con_entrega" | "adelantado";
+};
+
 export function generateCartSummary(orderDraft: ConversationOrderDraftV2): string {
   if (!orderDraft || orderDraft.items.length === 0) {
-    return "Tu carrito está vacío. ¿Quieres agregar algo?";
+    return "Tu carrito esta vacio. Queres agregar algo?";
   }
 
-  const segments: string[] = [];
-
-  // SRS v4: Título del resumen
-  segments.push("🛒 **Resumen de tu pedido:**\n");
-
-  // Mostrar acción aplicada (si corresponde)
-  if (orderDraft.cartAction) {
-    const actionMessages: Record<string, string> = {
-      add: "➕ Agregado",
-      remove: "➖ Quitado",
-      replace: "🔄 Cambiado",
-      clear: "🗑 Carrito vaciado"
-    };
-
-    segments.push(`${actionMessages[orderDraft.cartAction]}\n`);
-  }
-
-  // Lista de items
-  segments.push("**Items:**\n");
-
-  for (const [index, item] of orderDraft.items.entries()) {
+  const lines = orderDraft.items.map((item, index) => {
     const subtotal = item.cantidad * item.precioUnitario;
-    const itemString = `   ${index + 1}. ${item.cantidad} × ${item.producto} ($${subtotal})`;
+    return `${index + 1}. ${item.cantidad} x ${item.producto} ($${subtotal})`;
+  });
 
-    segments.push(itemString + "\n");
-  }
-
-  // SRS v4: Total
-  segments.push(`\n💰 **Total:** $${orderDraft.total}\n`);
-
-  // SRS v4: Mostrar acción para continuar o confirmar
-  segments.push("¿Quieres agregar más, confirmar o realizar alguna otra acción?");
-
-  return segments.join("");
+  return [
+    "Resumen de tu pedido:",
+    ...lines,
+    `Total: $${orderDraft.total}`,
+    "Queres agregar mas, confirmar o modificar algo?"
+  ].join("\n");
 }
 
-/**
- * SRS v4: Genera respuesta cuando no hay items en el carrito
- */
 export function generateEmptyCartResponse(): string {
-  return "Tu carrito está vacío. ¿Quieres agregar algo del menú?\n\n" +
-    "💵 Puedes ver el menú escribiendo 'menu' o 'qué tienen'.";
+  return "Tu carrito esta vacio. Queres agregar algo del menu?";
 }
 
-/**
- * SRS v4: Genera respuesta de confirmación profesional sin "Che"
- * Mejora el tono de las respuestas según Sprint 3.
- */
 export function generateProfessionalConfirmation(orderDraft: ConversationOrderDraftV2): string {
-  const segments: string[] = [];
-
-  // SRS v4: Saludo profesional (sin "Che")
-  segments.push("¡Listo! Tu pedido ha sido confirmado.\n");
-
-  // Resumen de items
   const itemsSummary = orderDraft.items
-    .map(item => `${item.cantidad} ${item.producto}`)
+    .map((item) => `${item.cantidad} ${item.producto}`)
     .join(", ");
+  const deliveryLine =
+    orderDraft.tipoEntrega === "delivery"
+      ? `Delivery a: ${orderDraft.direccion}`
+      : "Retiro en sucursal";
 
-  segments.push(`📋 **Items:** ${itemsSummary}\n`);
-
-  // Tipo de entrega
-  if (orderDraft.tipoEntrega === "delivery") {
-    segments.push(`🚚 **Delivery a:** ${orderDraft.direccion}\n`);
-  } else if (orderDraft.tipoEntrega === "pickup") {
-    segments.push(`🏃 **Retiro en sucursal**\n`);
-  }
-
-  // Total
-  segments.push(`💰 **Total:** $${orderDraft.total}\n`);
-
-  // Método de pago
-  if (orderDraft.metodoPago) {
-    const paymentMessages: Record<string, string> = {
-      efectivo: "💵 Efectivo",
-      transferencia: "📱 Transferencia",
-      "mercado pago": "📲 MercadoPago"
-    };
-
-    segments.push(`${paymentMessages[orderDraft.metodoPago]} - Método de pago\n`);
-  }
-
-  // SRS v4: Despedida profesional
-  segments.push("🙏 ¡Gracias por tu pedido! Tu pedido será procesado a la brevedad.\n");
-
-  return segments.join("");
+  return [
+    "Listo! Tu pedido fue confirmado.",
+    `Items: ${itemsSummary}`,
+    deliveryLine,
+    `Total: $${orderDraft.total}`,
+    "Gracias por tu pedido."
+  ].join("\n");
 }
 
-/**
- * SRS v4: Genera respuesta de error cuando el carrito tiene problemas
- */
 export function generateCartErrorResponse(
   errorType: "empty" | "invalid_item" | "cannot_remove"
 ): string {
-  switch (errorType) {
-    case "empty":
-      return "Lo siento, no hay items en tu carrito para realizar esa acción. ¿Quieres agregar algo del menú?";
-
-    case "invalid_item":
-      return "Lo siento, no pude identificar el producto que mencionas. ¿Podrías reformular tu pedido?";
-
-    case "cannot_remove":
-      return "Lo siento, no pude quitar ese item de tu carrito. ¿Podrías intentar de nuevo?";
-
-    default:
-      return "Lo siento, hubo un problema con tu pedido. ¿Podrías intentarlo de nuevo?";
+  if (errorType === "empty") {
+    return "No hay items en tu carrito para realizar esa accion.";
   }
+
+  if (errorType === "invalid_item") {
+    return "No pude identificar el producto. Podes reformular tu pedido?";
+  }
+
+  if (errorType === "cannot_remove") {
+    return "No pude quitar ese item del carrito. Intenta nuevamente.";
+  }
+
+  return "Hubo un problema con tu pedido. Intenta nuevamente.";
 }
 
-/**
- * SRS v4: Genera respuesta de acción de carrito
- * Proporciona feedback claro sobre la acción realizada (add/remove/replace/clear).
- */
 export function generateCartActionResponse(
   action: "add" | "remove" | "replace" | "clear",
   item?: string,
   newTotal?: number
 ): string {
-  const segments: string[] = [];
-
-  switch (action) {
-    case "add":
-      segments.push(`✅ **Agregado:** ${item || "item(s)"}\n`);
-      if (newTotal !== undefined) {
-        segments.push(`💰 Nuevo total: $${newTotal}\n`);
-      }
-      segments.push("¿Quieres agregar algo más?");
-      break;
-
-    case "remove":
-      segments.push(`✅ **Quitado:** ${item}\n`);
-      if (newTotal !== undefined) {
-        segments.push(`💰 Nuevo total: $${newTotal}\n`);
-      }
-      segments.push("¿Quieres agregar algo más?");
-      break;
-
-    case "replace":
-      segments.push(`🔄 **Carrito actualizado:**\n`);
-      segments.push(`Nuevo pedido: ${item}\n`);
-      segments.push(`💰 Total: $${newTotal}\n`);
-      segments.push("¿Quieres agregar algo más?");
-      break;
-
-    case "clear":
-      segments.push(`🗑 **Carrito vaciado**\n`);
-      segments.push("¿Quieres comenzar un nuevo pedido?");
-      break;
+  if (action === "clear") {
+    return "Carrito vaciado. Queres empezar un nuevo pedido?";
   }
 
-  return segments.join("");
-}
-
-/**
- * SRS v4: Genera respuesta profesional de saludo
- * Reemplaza el saludo informal "Che" con una versión más profesional.
- */
-export function generateProfessionalGreeting(): string {
-  return "¡Hola! Bienvenido a RestauLang. Puedo ayudarte con el menú, horarios o tomar tu pedido.";
-}
-
-/**
- * SRS v4: Genera respuesta de error genérica profesional
- */
-export function generateProfessionalErrorResponse(context: string): string {
-  const responses: Record<string, string> = {
-    general: "Lo siento, no entendí tu mensaje. ¿Podrías reformularlo?",
-    order: "Lo siento, hubo un problema con tu pedido. ¿Podrías intentarlo de nuevo?",
-    payment: "Lo siento, hubo un problema con el pago. ¿Podrías verificar los datos?",
-    menu: "Lo siento, no tengo información sobre eso. ¿Quieres ver el menú?",
-    technical: "Lo siento, estamos experimentando dificultades técnicas. Por favor, intenta nuevamente en unos momentos."
+  const labelByAction: Record<"add" | "remove" | "replace", string> = {
+    add: "Agregado",
+    remove: "Quitado",
+    replace: "Pedido actualizado"
   };
 
-  return responses[context] || responses.general;
+  const lines = [`${labelByAction[action]}: ${item ?? "item(s)"}`];
+
+  if (typeof newTotal === "number") {
+    lines.push(`Nuevo total: $${newTotal}`);
+  }
+
+  lines.push("Queres agregar algo mas?");
+
+  return lines.join("\n");
 }
 
-/**
- * SRS v4: Valida y corrige el nombre del cliente
- * Asegura que el nombre sea válido (sin números ni caracteres especiales).
- */
+export function generateProfessionalGreeting(): string {
+  return "Hola! Bienvenido a RestauLang. Puedo ayudarte con el menu, horarios o tomar tu pedido.";
+}
+
+export function generateProfessionalErrorResponse(context: string): string {
+  const responses: Record<string, string> = {
+    general: "No entendi tu mensaje. Podes reformularlo?",
+    order: "Hubo un problema con tu pedido. Intenta nuevamente.",
+    payment: "Hubo un problema con el pago. Verifica los datos.",
+    menu: "No tengo esa informacion. Queres ver el menu?",
+    technical: "Estamos con una dificultad tecnica. Intenta de nuevo en unos minutos."
+  };
+
+  return responses[context] ?? responses.general;
+}
+
 export function validateAndCleanCustomerName(name: string): {
   cleaned: string;
   valid: boolean;
-
-  // Remover números y caracteres especiales
-  cleaned = name
-    .replace(/[0-9]/g, "")
-    .replace(/[!@#$%^&*()_+=|{}[\]\\:;"'<>,.?/]/g, "")
+  error?: string;
+} {
+  const cleaned = name
+    .replace(/[0-9]/gu, "")
+    .replace(/[!@#$%^&*()_+=|{}[\]\\:;"'<>,.?/]/gu, "")
     .trim();
 
-  valid = cleaned.length >= 2 && cleaned.length <= 50;
+  const valid = cleaned.length >= 2 && cleaned.length <= 50;
 
   return {
     cleaned,
     valid,
-    error: !valid ? "Por favor, proporciona un nombre válido (sin números ni caracteres especiales)." : undefined
+    error: valid
+      ? undefined
+      : "Por favor, proporciona un nombre valido (sin numeros ni caracteres especiales)."
   };
 }
 
-/**
- * SRS v4: Genera solicitud de información faltante
- * De manera clara y profesional, solicita los campos necesarios.
- */
 export function generateMissingFieldsRequest(missingFields: string[]): string {
-  const segments: string[] = [];
-
-  segments.push("Para completar tu pedido, necesito la siguiente información:\n");
-
-  for (const field of missingFields) {
-    segments.push(`  • ${field}\n`);
+  if (missingFields.length === 0) {
+    return "";
   }
 
-  segments.push("\n¿Podrías proporcionarla?");
-
-  return segments.join("");
+  const list = missingFields.map((field) => `- ${field}`).join("\n");
+  return `Para completar tu pedido, necesito:\n${list}`;
 }
 
-/**
- * SRS v4: Genera respuesta de seguimiento del pedido
- * Informa sobre el estado del pedido y próximos pasos.
- */
 export function generateOrderFollowUp(orderDraft: ConversationOrderDraftV2): string {
   if (!orderDraft || orderDraft.items.length === 0) {
-    return "¿Quieres comenzar un nuevo pedido?";
+    return "Queres comenzar un nuevo pedido?";
   }
 
-  const segments: string[] = [];
-
-  if (orderDraft.estado === "incompleto") {
-    const missingFields = getMissingFields(orderDraft);
-
-    if (missingFields.length > 0) {
-      segments.push(generateMissingFieldsRequest(missingFields));
-    } else {
-      segments.push("¿Hay algo más que quieras agregar o modificar?");
-    }
-  } else if (orderDraft.estado === "completo") {
-    segments.push("✅ Tu pedido está completo y listo para confirmar.");
-    segments.push("¿Confirmas para proceder?");
+  if (orderDraft.estado === "completo") {
+    return "Tu pedido esta completo. Confirmas para proceder?";
   }
 
-  return segments.join("");
+  const missingFields = getMissingFields(orderDraft);
+
+  if (missingFields.length === 0) {
+    return "Hay algo mas que quieras agregar o modificar?";
+  }
+
+  return generateMissingFieldsRequest(missingFields);
 }
 
-/**
- * SRS v4: Obtiene los campos faltantes del pedido
- */
 function getMissingFields(orderDraft: ConversationOrderDraft): string[] {
   const missing: string[] = [];
 
   if (!orderDraft.tipoEntrega) {
-    missing.push("Tipo de entrega (delivery o retiro en sucursal)");
+    missing.push("Tipo de entrega (delivery o retiro)");
   }
 
   if (orderDraft.tipoEntrega === "delivery" && !orderDraft.direccion) {
-    missing.push("Dirección de entrega");
+    missing.push("Direccion de entrega");
   }
 
   if (!orderDraft.metodoPago) {
-    missing.push("Método de pago (efectivo, transferencia, MercadoPago)");
+    missing.push("Metodo de pago");
   }
 
   if (!orderDraft.nombreCliente) {
     missing.push("Nombre del cliente");
   }
 
-  // SRS v4: Validar monto de pago si es efectivo
   if (orderDraft.metodoPago === "efectivo" && orderDraft.montoAbono === null) {
-    missing.push("Monto con el que vas a pagar (para calcular el vuelto)");
+    missing.push("Monto con el que vas a pagar");
   }
 
   return missing;
 }
 
-/**
- * SRS v4: Genera respuesta de confirmación de pedido con método de pago
- */
 export function generatePaymentConfirmationMessage(
   orderDraft: ConversationOrderDraftV2,
-  paymentConfig?: {
-    metodos: string[];
-    efectivoMinimo?: number;
-    transferenciaBanco?: string;
-    transferenciaAlias?: string;
-    entregaPago?: string;
-  }
+  paymentConfig?: PaymentConfigLite
 ): string {
-  const segments: string[] = [];
-
-  // Resumen del pedido
   const itemsSummary = orderDraft.items
-    .map(item => `${item.cantidad} ${item.producto}`)
+    .map((item) => `${item.cantidad} ${item.producto}`)
     .join(", ");
+  const lines = [
+    "Resumen de tu pedido:",
+    `Items: ${itemsSummary}`,
+    `Total: $${orderDraft.total}`
+  ];
 
-  segments.push("📋 **Resumen de tu pedido:**\n");
-  segments.push(`   Items: ${itemsSummary}\n`);
-
-  // Tipo de entrega
   if (orderDraft.tipoEntrega === "delivery") {
-    segments.push(`   🚚 Delivery a: ${orderDraft.direccion}\n`);
+    lines.push(`Delivery a: ${orderDraft.direccion}`);
   } else {
-    segments.push(`   🏃 Retiro en sucursal\n`);
+    lines.push("Retiro en sucursal");
   }
 
-  // Total
-  segments.push(`   💰 Total: $${orderDraft.total}\n`);
-
-  // Método de pago y monto
   if (orderDraft.metodoPago === "efectivo") {
-    segments.push(`   💵 Pagando en efectivo\n`);
-
-    if (orderDraft.montoAbono !== null) {
-      const vuelto = orderDraft.montoAbono - orderDraft.total;
-      if (vuelto > 0) {
-        segments.push(`   Monto: $${orderDraft.montoAbono} (Vuelto: $${vuelto})\n`);
+    lines.push("Pago en efectivo");
+    if (typeof orderDraft.montoAbono === "number") {
+      const change = orderDraft.montoAbono - orderDraft.total;
+      if (change > 0) {
+        lines.push(`Abonas $${orderDraft.montoAbono} (vuelto: $${change})`);
       } else {
-        segments.push(`   Monto exacto: $${orderDraft.montoAbono}\n`);
+        lines.push(`Abonas $${orderDraft.montoAbono}`);
       }
     }
 
-    // SRS v4: Información de pago si está configurada
-    if (paymentConfig && paymentConfig.efectivoMinimo > 0) {
-      segments.push(`   💵 Mínimo de efectivo: $${paymentConfig.efectivoMinimo}\n`);
-    }
-  } else if (orderDraft.metodoPago === "transferencia") {
-    segments.push(`   📱 Pagando por transferencia\n`);
-
-    if (paymentConfig && paymentConfig.transferenciaBanco) {
-      segments.push(`   🏦 Banco: ${paymentConfig.transferenciaBanco}\n`);
-    }
-    if (paymentConfig && paymentConfig.transferenciaAlias) {
-      segments.push(`   📲 Alias: ${paymentConfig.transferenciaAlias}\n`);
-    }
-    if (paymentConfig && paymentConfig.transferenciaCBU) {
-      segments.push(`   📟 CBU: ${paymentConfig.transferenciaCBU}\n`);
-    }
-    if (paymentConfig && paymentConfig.transferenciaCUIT) {
-      segments.push(`   🆔 CUIT/CUIL: ${paymentConfig.transferenciaCUIT}\n`);
+    if ((paymentConfig?.efectivoMinimo ?? 0) > 0) {
+      lines.push(`Minimo en efectivo: $${paymentConfig?.efectivoMinimo}`);
     }
   }
 
-  // SRS v4: Información de entrega de pago
-  if (paymentConfig && paymentConfig.entregaPago === "adelantado") {
-    segments.push(`   ⚠️  Importante: La transferencia debe ser enviada antes de la entrega del pedido.\n`);
+  if (orderDraft.metodoPago === "transferencia") {
+    lines.push("Pago por transferencia");
+    if (paymentConfig?.transferenciaBanco) {
+      lines.push(`Banco: ${paymentConfig.transferenciaBanco}`);
+    }
+    if (paymentConfig?.transferenciaAlias) {
+      lines.push(`Alias: ${paymentConfig.transferenciaAlias}`);
+    }
+    if (paymentConfig?.transferenciaCBU) {
+      lines.push(`CBU: ${paymentConfig.transferenciaCBU}`);
+    }
+    if (paymentConfig?.transferenciaCUIT) {
+      lines.push(`CUIT/CUIL: ${paymentConfig.transferenciaCUIT}`);
+    }
+    if (paymentConfig?.entregaPago === "adelantado") {
+      lines.push("Importante: la transferencia debe enviarse antes de la entrega.");
+    }
   }
 
-  segments.push("\n✅ **¿Confirmas el pedido?**\n");
-
-  return segments.join("");
+  lines.push("Confirmas el pedido?");
+  return lines.join("\n");
 }
 
-/**
- * SRS v4: Genera respuesta para pedido con monto insuficiente
- */
-export function generateInsufficientPaymentResponse(orderTotal: number, providedAmount: number): string {
-  const faltante = orderTotal - providedAmount;
+export function generateInsufficientPaymentResponse(
+  orderTotal: number,
+  providedAmount: number
+): string {
+  const missing = orderTotal - providedAmount;
 
-  return `❌ Lo siento, el monto ingresado ($${providedAmount}) es insuficiente.\n\n` +
-    `El total de tu pedido es $${orderTotal} y faltan $${faltante}.\n\n` +
-    `💵 Por favor, ingresa un monto mayor o igual al total.`;
+  return [
+    `El monto ingresado ($${providedAmount}) es insuficiente.`,
+    `Total del pedido: $${orderTotal}. Faltan $${missing}.`,
+    "Ingresa un monto mayor o igual al total."
+  ].join("\n");
 }
 
-/**
- * SRS v4: Genera respuesta de confirmación simple (sin detalles de pago)
- */
 export function generateSimpleConfirmation(orderDraft: ConversationOrderDraftV2): string {
-  const segments: string[] = [];
-
-  segments.push("✅ **Tu pedido ha sido confirmado:**\n");
-
   const itemsSummary = orderDraft.items
-    .map(item => `${item.cantidad} ${item.producto}`)
+    .map((item) => `${item.cantidad} ${item.producto}`)
     .join(", ");
 
-  segments.push(`📋 Items: ${itemsSummary}\n`);
-
-  if (orderDraft.tipoEntrega === "delivery") {
-    segments.push(`🚚 Delivery a: ${orderDraft.direccion}\n`);
-  } else {
-    segments.push(`🏃 Retiro en sucursal\n`);
-  }
-
-  segments.push(`💰 Total: $${orderDraft.total}\n`);
-  segments.push("\n🙏 ¡Gracias por tu pedido!");
-
-  return segments.join("");
+  return [
+    "Tu pedido fue confirmado:",
+    `Items: ${itemsSummary}`,
+    orderDraft.tipoEntrega === "delivery"
+      ? `Delivery a: ${orderDraft.direccion}`
+      : "Retiro en sucursal",
+    `Total: $${orderDraft.total}`,
+    "Gracias por tu pedido."
+  ].join("\n");
 }

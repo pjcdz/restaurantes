@@ -1,4 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  listFallbackHandedOffSessions,
+  resetFallbackHandedOffSessions,
+  setFallbackSessionStatus
+} from "./handoff-session-store.js";
 
 const mockMutation = vi.fn();
 const mockQuery = vi.fn();
@@ -30,6 +35,7 @@ import { ConvexAdminRepository } from "./convex-admin-repository.js";
 describe("ConvexAdminRepository compatibility retries", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    resetFallbackHandedOffSessions();
   });
 
   it("retries upsertCatalogItem without unsupported extra field", async () => {
@@ -79,5 +85,56 @@ describe("ConvexAdminRepository compatibility retries", () => {
     expect(mockMutation.mock.calls[1]?.[1]).toEqual({
       chatId: "5493870000000"
     });
+  });
+
+  it("returns fallback handed-off sessions when listHandedOffSessions function is unavailable", async () => {
+    const repository = new ConvexAdminRepository("https://convex.test");
+
+    setFallbackSessionStatus("5493871111111", "handed_off");
+    mockQuery.mockRejectedValueOnce(
+      new Error(
+        "[Request ID: test] Server Error Could not find public function for 'conversations:listHandedOffSessions'."
+      )
+    );
+
+    const sessions = await repository.getHandedOffSessions();
+
+    expect(sessions).toEqual([
+      expect.objectContaining({
+        chatId: "5493871111111",
+        phoneNumber: null
+      })
+    ]);
+  });
+
+  it("includes fallback handed-off sessions even when Convex query succeeds with empty data", async () => {
+    const repository = new ConvexAdminRepository("https://convex.test");
+
+    setFallbackSessionStatus("5493873333333", "handed_off");
+    mockQuery.mockResolvedValueOnce([]);
+
+    const sessions = await repository.getHandedOffSessions();
+
+    expect(sessions).toEqual([
+      expect.objectContaining({
+        chatId: "5493873333333",
+        phoneNumber: null
+      })
+    ]);
+  });
+
+  it("clears local fallback handoff session on reactivation when updateSessionStatus is unavailable", async () => {
+    const repository = new ConvexAdminRepository("https://convex.test");
+
+    setFallbackSessionStatus("5493872222222", "handed_off");
+    mockMutation.mockRejectedValueOnce(
+      new Error(
+        "[Request ID: test] Server Error Could not find public function for 'conversations:updateSessionStatus'."
+      )
+    );
+
+    await repository.reactivateSession("5493872222222");
+
+    expect(listFallbackHandedOffSessions()).toEqual([]);
   });
 });

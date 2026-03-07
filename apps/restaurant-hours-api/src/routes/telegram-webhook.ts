@@ -215,6 +215,13 @@ async function processTelegramUpdate(input: {
     tracingEnvironment: input.tracingEnvironment
   });
 
+  if (!reply.trim()) {
+    logger.info("Skipping automated reply because session is currently handed off", undefined, {
+      chatId: String(input.chatId)
+    });
+    return;
+  }
+
   await input.telegramSender({
     chatId: input.chatId,
     text: reply

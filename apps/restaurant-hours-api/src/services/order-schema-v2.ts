@@ -203,11 +203,12 @@ export function cleanProductName(text: string): string {
   const stopwords = [
     "quiero", "quisiera", "pedir", "un", "una", "el", "la",
     "los", "las", "me", "dame", "da", "traeme", "trae",
-    "mandame", "manda", "por favor", "porfa"
+    "mandame", "manda", "por", "favor", "porfa"
   ];
 
   return text
     .toLowerCase()
+    .replace(/[.,!?;:]/gu, " ")
     .split(/\s+/)
     .filter(word => !stopwords.includes(word))
     .join(" ")
@@ -243,31 +244,52 @@ export function validateCartActionForState(
  */
 export function applyCartAction(
   currentCart: Array<any>,
-  newItem: any,
+  newItem: any | Array<any>,
   action: CartAction
 ): Array<any> {
+  const incomingItems = Array.isArray(newItem) ? newItem : [newItem];
+
   switch (action) {
-    case "add":
-      // Buscar si el producto ya existe y acumular cantidad
-      const existingIndex = currentCart.findIndex(item => item.producto === newItem.producto);
-      if (existingIndex >= 0) {
-        const updated = [...currentCart];
-        updated[existingIndex] = {
-          ...updated[existingIndex],
-          cantidad: updated[existingIndex].cantidad + newItem.cantidad
-        };
-        return updated;
+    case "add": {
+      const updated = [...currentCart];
+
+      for (const item of incomingItems) {
+        if (!item?.producto) {
+          continue;
+        }
+
+        const existingIndex = updated.findIndex(
+          (currentItem) => currentItem.producto === item.producto
+        );
+
+        if (existingIndex >= 0) {
+          updated[existingIndex] = {
+            ...updated[existingIndex],
+            cantidad: updated[existingIndex].cantidad + (item.cantidad ?? 1),
+            precioUnitario: item.precioUnitario ?? updated[existingIndex].precioUnitario
+          };
+          continue;
+        }
+
+        updated.push({
+          ...item,
+          cantidad: item.cantidad ?? 1
+        });
       }
-      // Agregar nuevo item
-      return [...currentCart, newItem];
+
+      return updated;
+    }
 
     case "remove":
       // Quitar producto del carrito
-      return currentCart.filter(item => item.producto !== newItem.producto);
+      return currentCart.filter(
+        (item) =>
+          !incomingItems.some((incoming) => incoming?.producto === item.producto)
+      );
 
     case "replace":
       // Reemplazar todo el carrito
-      return [newItem];
+      return incomingItems.filter((item) => Boolean(item?.producto));
 
     case "clear":
       // Vaciar el carrito

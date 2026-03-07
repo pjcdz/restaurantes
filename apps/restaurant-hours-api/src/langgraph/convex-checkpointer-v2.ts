@@ -18,9 +18,6 @@ import {
 } from "@langchain/langgraph-checkpoint";
 import type { RunnableConfig } from "@langchain/core/runnables";
 
-// Define AsyncGenerator type inline since it's not exported
-type AsyncGenerator<T> = AsyncIterableIterator<T>;
-
 import {
   type ConversationCheckpoint,
   type ConversationRepository
@@ -88,11 +85,12 @@ function checkpointToPersistedStateV2(
  */
 function persistedStateToCheckpointV2(
   persisted: Record<string, unknown>,
-  threadId: string,
-  namespace: string = ""
+  threadId: string
 ): Checkpoint {
   // SRS v4: Usar version 4 de checkpoint
-  const checkpointId = persisted.checkpointId || generateCheckpointIdV2(threadId, 0);
+  const persistedCheckpointId =
+    typeof persisted.checkpointId === "string" ? persisted.checkpointId : undefined;
+  const checkpointId = persistedCheckpointId ?? generateCheckpointIdV2(threadId, 0);
 
   return {
     v: 4,
@@ -125,16 +123,7 @@ function persistedStateToCheckpointV2(
       paymentConfirmed: false
     },
     channel_versions: {},
-    versions_seen: {},
-    // SRS v4: Mantener metadata para trazabilidad
-    metadata: {
-      source: persisted.source ?? "input",
-      step: persisted.step ?? 0,
-      version: persisted.version ?? "4",
-      timestamp: new Date().toISOString(),
-      threadId,
-      namespace
-    }
+    versions_seen: {}
   };
 }
 
@@ -154,6 +143,7 @@ type PersistedConversationStateV2 = {
   checkpointId?: string;
   source?: string;
   step?: number;
+  namespace?: string;
 };
 
 /**
@@ -177,6 +167,48 @@ type RetrievedCheckpointV2 = Omit<ConversationCheckpoint, "id"> & {
   metadata?: string;
   namespace?: string;
 };
+
+function parsePersistedCheckpoint(
+  checkpointRecord: ConversationCheckpoint
+): PersistedConversationStateV2 {
+  try {
+    const parsed = checkpointRecord.checkpoint
+      ? JSON.parse(checkpointRecord.checkpoint) as Record<string, unknown>
+      : {};
+    return parsed as PersistedConversationStateV2;
+  } catch (error) {
+    logger.error("Failed to parse checkpoint JSON from Convex V2", undefined, undefined, {
+      threadId: checkpointRecord.threadId,
+      sessionId: checkpointRecord.sessionId,
+      error: error instanceof Error
+        ? { name: error.name, message: error.message }
+        : { name: "UnknownError", message: String(error) }
+    });
+
+    return {
+      intent: null,
+      orderDraft: null,
+      threadId: checkpointRecord.threadId,
+      lastHandledAt: null,
+      lastHandledMessage: null,
+      lastResponseText: null,
+      chatId: null,
+      version: "4",
+      checkpointId: undefined,
+      source: "input",
+      step: 0,
+      namespace: checkpointRecord.namespace ?? ""
+    };
+  }
+}
+
+function normalizeCheckpointSource(
+  source: unknown
+): CheckpointMetadata["source"] {
+  return source === "fork" || source === "input" || source === "loop" || source === "update"
+    ? source
+    : "input";
+}
 
 /**
  * SRS v4: Generate checkpoint ID from version string
@@ -239,23 +271,13 @@ export class ConvexCheckpointerV2 extends BaseCheckpointSaver<number> {
         return undefined;
       }
 
-      const retrieved = latestCheckpoint as unknown;
-
-      // SRS v4: Verificar que el checkpoint tenga los campos esperados
-      if (typeof retrieved !== "object" || retrieved === null) {
-        logger.error("Invalid checkpoint data type", undefined, undefined, {
-          sessionId,
-          retrieved: JSON.stringify(retrieved)
-        });
-        return undefined;
-      }
-
-      const checkpointData = retrieved as PersistedConversationStateV2;
+      const checkpointData = parsePersistedCheckpoint(latestCheckpoint);
 
       return persistedStateToCheckpointV2(
         checkpointData,
-        latestCheckpoint.threadId ?? config.configurable?.["thread_id"] as string || "",
-        checkpointData.namespace || ""
+        latestCheckpoint.threadId ??
+          (config.configurable?.["thread_id"] as string | undefined) ??
+          ""
       );
     } catch (error) {
       const errorObj = error instanceof Error
@@ -286,18 +308,17 @@ export class ConvexCheckpointerV2 extends BaseCheckpointSaver<number> {
       getSessionId(config) ?? ""
     );
 
-    const checkpointData = retrievedCheckpoint as PersistedConversationStateV2;
+    const checkpointData = retrievedCheckpoint
+      ? parsePersistedCheckpoint(retrievedCheckpoint)
+      : undefined;
 
     return {
       config,
       checkpoint,
       metadata: {
-        source: checkpointData?.source ?? "input",
+        source: normalizeCheckpointSource(checkpointData?.source),
         step: checkpointData?.step ?? 0,
-        version: checkpointData?.version ?? "4",
-        timestamp: new Date().toISOString(),
-        threadId: checkpointData?.threadId ?? "",
-        namespace: checkpointData?.namespace || ""
+        parents: {}
       }
     };
   }
@@ -308,7 +329,7 @@ export class ConvexCheckpointerV2 extends BaseCheckpointSaver<number> {
   async *list(
     config: RunnableConfig,
     options?: CheckpointListOptions
-  ): AsyncGenerator<CheckpointTuple> {
+  ): AsyncGenerator<CheckpointTuple, void, unknown> {
     const sessionId = getSessionId(config);
 
     if (!sessionId) {
@@ -322,28 +343,22 @@ export class ConvexCheckpointerV2 extends BaseCheckpointSaver<number> {
         return;
       }
 
-      const persistedState = latestCheckpoint.checkpoint
-        ? JSON.parse(latestCheckpoint.checkpoint) as Record<string, unknown>
-        : {};
-
-      const checkpointData = persistedState as PersistedConversationStateV2;
+      const checkpointData = parsePersistedCheckpoint(latestCheckpoint);
 
       const checkpoint = persistedStateToCheckpointV2(
         checkpointData,
-        latestCheckpoint.threadId ?? config.configurable?.["thread_id"] as string || "",
-        checkpointData.namespace || ""
+        latestCheckpoint.threadId ??
+          (config.configurable?.["thread_id"] as string | undefined) ??
+          ""
       );
 
       yield {
         config,
         checkpoint,
         metadata: {
-          source: checkpointData?.source ?? "input",
+          source: normalizeCheckpointSource(checkpointData?.source),
           step: checkpointData?.step ?? 0,
-          version: checkpointData?.version ?? "4",
-          timestamp: new Date().toISOString(),
-          threadId: checkpointData?.threadId ?? "",
-          namespace: checkpointData?.namespace || ""
+          parents: {}
         }
       };
     } catch (error) {

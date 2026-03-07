@@ -1,6 +1,7 @@
 import { getConvexUrl } from "../config.js";
 import {
   createConversationAssistant,
+  createConversationAssistantV2,
   type ConversationAssistant
 } from "./conversation-assistant.js";
 import { ConvexConversationRepository } from "./convex-conversation-repository.js";
@@ -15,7 +16,8 @@ export function getDefaultConversationAssistant(): ConversationAssistant {
     return cachedAssistant;
   }
 
-  const baseAssistant = createConversationAssistant({
+  // SRS v4: Usar createConversationAssistantV2 como assistant principal.
+  const baseAssistant = createConversationAssistantV2({
     repository: new ConvexConversationRepository(getConvexUrl()),
     composeResponse: createGemmaResponseComposer(),
     extractOrderRequest: createGemmaOrderExtractionAgent()

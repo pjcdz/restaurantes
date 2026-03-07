@@ -52,6 +52,7 @@ export default defineSchema({
     metodoPago: v.union(v.string(), v.null()),
     nombreCliente: v.union(v.string(), v.null()),
     total: v.number(),
+    montoAbono: v.optional(v.number()),
     estado: v.union(
       v.literal("completo"),
       v.literal("error_producto"),

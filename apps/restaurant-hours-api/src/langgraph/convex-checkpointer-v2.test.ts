@@ -43,9 +43,9 @@ describe("Convex Checkpointer V2 - generateCheckpointIdV2", () => {
     const sequence2 = `${threadId}:${Date.now().toString(36)}:10`;
     const sequence3 = `${threadId}:${Date.now().toString(36)}:100`;
 
-    expect(sequence1).endsWith(":1");
-    expect(sequence2).endsWith(":10");
-    expect(sequence3).endsWith(":100");
+    expect(sequence1).toMatch(/:1$/u);
+    expect(sequence2).toMatch(/:10$/u);
+    expect(sequence3).toMatch(/:100$/u);
   });
 });
 
@@ -213,7 +213,7 @@ describe("Convex Checkpointer V2 - list method", () => {
   it("should return empty iterator when no session_id", async () => {
     const iterator = checkpointer.list({ configurable: {} });
 
-    const result = await Array.fromAsync(iterator);
+    const result = await arrayFromAsync(iterator);
 
     expect(result).toHaveLength(0);
   });
@@ -233,7 +233,7 @@ describe("Convex Checkpointer V2 - list method", () => {
     };
 
     const iterator = checkpointer.list(config);
-    const result = await Array.fromAsync(iterator);
+    const result = await arrayFromAsync(iterator);
 
     expect(result).toHaveLength(1);
     expect(result[0].checkpoint).toBeDefined();
@@ -261,7 +261,7 @@ describe("Convex Checkpointer V2 - getNextVersion", () => {
 });
 
 // Helper for async iteration in tests
-async function Array.fromAsync<T>(iterator: AsyncIterator<T>): Promise<T[]> {
+async function arrayFromAsync<T>(iterator: AsyncIterable<T>): Promise<T[]> {
   const result: T[] = [];
 
   for await (const item of iterator) {

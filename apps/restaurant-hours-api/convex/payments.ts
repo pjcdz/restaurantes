@@ -34,7 +34,6 @@ export const getActivePaymentConfig = query({
     }
 
     return {
-      id: config._id,
       metodos: config.metodos,
       efectivoMinimo: config.efectivoMinimo,
       transferenciaBanco: config.transferenciaBanco,
@@ -71,11 +70,9 @@ export const upsertPaymentConfig = mutation({
       .withIndex("by_activo", (q) => q.eq("activo", true))
       .unique();
 
-    const now = Date.now();
-
     if (existing) {
       // Si existe una configuración activa, la actualizamos
-      const updated = await ctx.db.patch(existing._id, {
+      await ctx.db.patch(existing._id, {
         metodos: args.metodos,
         efectivoMinimo: args.efectivoMinimo,
         transferenciaBanco: args.transferenciaBanco,
@@ -87,20 +84,19 @@ export const upsertPaymentConfig = mutation({
       });
 
       return {
-        id: updated._id,
-        metodos: updated.metodos,
-        efectivoMinimo: updated.efectivoMinimo,
-        transferenciaBanco: updated.transferenciaBanco,
-        transferenciaAlias: updated.transferenciaAlias,
-        transferenciaCBU: updated.transferenciaCBU,
-        transferenciaCUIT: updated.transferenciaCUIT,
-        entregaPago: updated.entregaPago,
-        activo: updated.activo
+        metodos: args.metodos,
+        efectivoMinimo: args.efectivoMinimo,
+        transferenciaBanco: args.transferenciaBanco,
+        transferenciaAlias: args.transferenciaAlias,
+        transferenciaCBU: args.transferenciaCBU,
+        transferenciaCUIT: args.transferenciaCUIT,
+        entregaPago: args.entregaPago,
+        activo: true
       };
     }
 
     // Si no existe, creamos una nueva
-    const id = await ctx.db.insert("payment_config", {
+    await ctx.db.insert("payment_config", {
       metodos: args.metodos,
       efectivoMinimo: args.efectivoMinimo,
       transferenciaBanco: args.transferenciaBanco,
@@ -108,13 +104,10 @@ export const upsertPaymentConfig = mutation({
       transferenciaCBU: args.transferenciaCBU,
       transferenciaCUIT: args.transferenciaCUIT,
       entregaPago: args.entregaPago,
-      activo: true,
-      createdAt: now,
-      updatedAt: now
+      activo: true
     });
 
     return {
-      id,
       metodos: args.metodos,
       efectivoMinimo: args.efectivoMinimo,
       transferenciaBanco: args.transferenciaBanco,

@@ -42,6 +42,41 @@ describe("POST /telegram/webhook", () => {
     });
   });
 
+  it("does not send Telegram messages when assistant reply is empty", async () => {
+    const telegramSender = vi.fn().mockResolvedValue(undefined);
+    const assistantService = {
+      handleIncomingMessage: vi.fn().mockResolvedValue("")
+    };
+    const app = createApp({
+      telegramSender,
+      assistantService,
+      skipAuth: true,
+      skipSignatureValidation: true
+    });
+
+    const response = await request(app)
+      .post("/telegram/webhook")
+      .send({
+        message: {
+          chat: {
+            id: 888
+          },
+          text: "hola"
+        }
+      });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({
+      ok: true
+    });
+    expect(assistantService.handleIncomingMessage).toHaveBeenCalledWith({
+      chatId: "888",
+      text: "hola",
+      tracingEnvironment: "dev"
+    });
+    expect(telegramSender).not.toHaveBeenCalled();
+  });
+
   it("acknowledges the webhook before the assistant finishes", async () => {
     let resolveReply: ((value: string) => void) | null = null;
     const telegramSender = vi.fn().mockResolvedValue(undefined);

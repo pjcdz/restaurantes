@@ -1,4 +1,6 @@
-import { getTelegramBotToken } from "../config.js";
+import { fileURLToPath } from "node:url";
+
+import { getTelegramBotToken, getTelegramWebhookSecret } from "../config.js";
 import { loadEnvironmentFile } from "../environment.js";
 import {
   getNgrokApiTunnelsUrl,
@@ -32,19 +34,31 @@ async function readNgrokWebhookUrl(fetchImpl: typeof fetch = fetch): Promise<str
   return buildTelegramWebhookUrl(publicUrl);
 }
 
+export function buildSetWebhookPayload(
+  webhookUrl: string,
+  webhookSecret: string | undefined
+): {
+  url: string;
+  secret_token?: string;
+} {
+  return webhookSecret
+    ? { url: webhookUrl, secret_token: webhookSecret }
+    : { url: webhookUrl };
+}
+
 async function registerTelegramWebhook(fetchImpl: typeof fetch = fetch) {
   loadEnvironmentFile();
 
   const token = getTelegramBotToken();
+  const webhookSecret = getTelegramWebhookSecret();
   const webhookUrl = await readNgrokWebhookUrl(fetchImpl);
+  const webhookPayload = buildSetWebhookPayload(webhookUrl, webhookSecret);
   const response = await fetchImpl(buildTelegramSetWebhookApiUrl(token), {
     method: "POST",
     headers: {
       "content-type": "application/json"
     },
-    body: JSON.stringify({
-      url: webhookUrl
-    })
+    body: JSON.stringify(webhookPayload)
   });
 
   let payload: TelegramApiResponse | undefined;
@@ -68,8 +82,18 @@ async function registerTelegramWebhook(fetchImpl: typeof fetch = fetch) {
   console.log(`Telegram webhook registered: ${webhookUrl}`);
 }
 
-registerTelegramWebhook().catch((error: unknown) => {
-  const message = error instanceof Error ? error.message : "Unknown error.";
-  console.error(message);
-  process.exit(1);
-});
+function isDirectExecution(): boolean {
+  if (!process.argv[1]) {
+    return false;
+  }
+
+  return fileURLToPath(import.meta.url) === process.argv[1];
+}
+
+if (isDirectExecution()) {
+  registerTelegramWebhook().catch((error: unknown) => {
+    const message = error instanceof Error ? error.message : "Unknown error.";
+    console.error(message);
+    process.exit(1);
+  });
+}

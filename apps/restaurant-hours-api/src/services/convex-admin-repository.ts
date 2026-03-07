@@ -2,14 +2,25 @@ import { ConvexHttpClient } from "convex/browser";
 import { anyApi } from "convex/server";
 
 import { type CatalogFaqRecord } from "./conversation-assistant.js";
+import {
+  listFallbackHandedOffSessions,
+  setFallbackSessionStatus
+} from "./handoff-session-store.js";
 
 const convexApi = anyApi as Record<string, any>;
 const EXTRA_FIELD_ERROR_PATTERN = /Object contains extra field [`"']?([a-zA-Z0-9_]+)[`"']?/u;
+const MISSING_FUNCTION_PATTERN = /Could not find public function for ['`]([^'"`]+)['`]/u;
 
 function extractUnsupportedField(error: unknown): string | null {
   const message = error instanceof Error ? error.message : String(error);
   const match = message.match(EXTRA_FIELD_ERROR_PATTERN);
   return match?.[1] ?? null;
+}
+
+function isMissingPublicFunction(error: unknown, functionName: string): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  const match = message.match(MISSING_FUNCTION_PATTERN);
+  return match?.[1] === functionName;
 }
 
 export type AdminCatalogItem = {
@@ -128,33 +139,69 @@ export class ConvexAdminRepository implements CatalogAdminRepository {
   }
 
   async getHandedOffSessions(): Promise<Array<HandedOffSession>> {
-    const sessions = await this.client.query(
-      convexApi.conversations.listHandedOffSessions,
-      {}
-    );
+    let persistedSessions: Array<HandedOffSession> = [];
 
-    return (sessions as Array<{
-      id: string;
-      chatId: string;
-      phoneNumber: string | null;
-      createdAt: number;
-      updatedAt: number;
-    }>).map((session) => ({
-      id: session.id,
-      chatId: session.chatId,
-      phoneNumber: session.phoneNumber,
-      createdAt: session.createdAt,
-      updatedAt: session.updatedAt
-    }));
+    try {
+      const sessions = await this.client.query(
+        convexApi.conversations.listHandedOffSessions,
+        {}
+      );
+
+      persistedSessions = (sessions as Array<{
+        id: string;
+        chatId: string;
+        phoneNumber: string | null;
+        createdAt: number;
+        updatedAt: number;
+      }>).map((session) => ({
+        id: session.id,
+        chatId: session.chatId,
+        phoneNumber: session.phoneNumber,
+        createdAt: session.createdAt,
+        updatedAt: session.updatedAt
+      }));
+    } catch (error) {
+      if (!isMissingPublicFunction(error, "conversations:listHandedOffSessions")) {
+        throw error;
+      }
+    }
+
+    const fallbackSessions = listFallbackHandedOffSessions();
+    const mergedByChatId = new Map<string, HandedOffSession>();
+
+    for (const session of persistedSessions) {
+      mergedByChatId.set(session.chatId, session);
+    }
+
+    for (const session of fallbackSessions) {
+      const existing = mergedByChatId.get(session.chatId);
+      if (!existing || session.updatedAt > existing.updatedAt) {
+        mergedByChatId.set(session.chatId, session);
+      }
+    }
+
+    return Array.from(mergedByChatId.values()).sort(
+      (left, right) => right.updatedAt - left.updatedAt
+    );
   }
 
   async reactivateSession(chatId: string): Promise<void> {
-    await this.mutateWithCompatibilityRetry<void>(
-      convexApi.conversations.updateSessionStatus,
-      {
-        chatId,
-        status: "active"
+    try {
+      await this.mutateWithCompatibilityRetry<void>(
+        convexApi.conversations.updateSessionStatus,
+        {
+          chatId,
+          status: "active"
+        }
+      );
+      setFallbackSessionStatus(chatId, "active");
+      return;
+    } catch (error) {
+      if (!isMissingPublicFunction(error, "conversations:updateSessionStatus")) {
+        throw error;
       }
-    );
+
+      setFallbackSessionStatus(chatId, "active");
+    }
   }
 }

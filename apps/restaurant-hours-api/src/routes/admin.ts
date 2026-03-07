@@ -124,6 +124,18 @@ type AdminFlash = {
   message: string;
 } | null;
 
+const ADMIN_PAGE_CONTENT_SECURITY_POLICY = [
+  "default-src 'self'",
+  "script-src 'self' 'unsafe-inline'",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data:",
+  "font-src 'self'",
+  "frame-ancestors 'none'",
+  "form-action 'self'",
+  "base-uri 'self'",
+  "object-src 'none'"
+].join(";");
+
 /**
  * Creates the admin router with JWT authentication protection.
  *
@@ -164,6 +176,7 @@ export function createAdminRouter(options: AdminRouteOptions = {}) {
     try {
       const adminData = await resolveRepository().getAdminData();
       const flash = resolveAdminFlash(request.query);
+      response.setHeader("Content-Security-Policy", ADMIN_PAGE_CONTENT_SECURITY_POLICY);
 
       // Generate CSRF token for the authenticated user
       const authenticatedReq = request as AuthenticatedRequest;
@@ -292,6 +305,9 @@ export function createAdminRouter(options: AdminRouteOptions = {}) {
   // Handoff management routes
   router.get("/handoffs", async (request, response, next) => {
     try {
+      response.setHeader("Cache-Control", "no-store");
+      response.setHeader("Pragma", "no-cache");
+      response.setHeader("Expires", "0");
       const sessions = await resolveRepository().getHandedOffSessions();
 
       return response.status(200).json(sessions);
@@ -580,6 +596,18 @@ function renderAdminPage(
         margin: 0 0 12px;
         color: #6f5c47;
       }
+      .handoff-notice {
+        margin: 0 0 12px;
+        padding: 10px 12px;
+        border-radius: 10px;
+        border: 1px solid #e3b04b;
+        background: #fff4d6;
+        color: #5d4300;
+        font-weight: 600;
+      }
+      .handoff-notice[hidden] {
+        display: none;
+      }
       .flash {
         margin: 0 0 18px;
         padding: 12px 14px;
@@ -679,6 +707,9 @@ function renderAdminPage(
           <section class="card" id="handoffs-section">
             <h2>Conversaciones Derivadas</h2>
             <p class="hint">Conversaciones donde la IA fue desactivada para atencion humana.</p>
+            <p id="handoffs-notice" class="handoff-notice" role="status" aria-live="polite" hidden>
+              Nuevas derivaciones pendientes: <span id="handoffs-notice-count">0</span>
+            </p>
             <table>
               <thead>
                 <tr>
@@ -699,16 +730,75 @@ function renderAdminPage(
       </main>
       <script>
         const csrfToken = "${escapeHtml(csrfToken)}";
+        const handoffNotice = document.getElementById("handoffs-notice");
+        const handoffNoticeCount = document.getElementById("handoffs-notice-count");
+        const knownHandoffUpdateByChatId = new Map();
+        const notifiedHandoffChatIds = new Set();
+        let hasLoadedHandoffs = false;
+        let handoffsRequestInFlight = false;
+
+        function updateHandoffNotice(pendingCount) {
+          if (!(handoffNotice instanceof HTMLElement) || !(handoffNoticeCount instanceof HTMLElement)) {
+            return;
+          }
+
+          if (pendingCount <= 0) {
+            handoffNotice.hidden = true;
+            handoffNoticeCount.textContent = "0";
+            return;
+          }
+
+          handoffNotice.hidden = false;
+          handoffNoticeCount.textContent = String(pendingCount);
+        }
+
+        function syncHandoffNotifications(sessions, shouldTrackNew) {
+          const activeChatIds = new Set();
+
+          for (const session of sessions) {
+            const chatId = String(session.chatId);
+            const updatedAt = Number(session.updatedAt);
+            const normalizedUpdatedAt = Number.isFinite(updatedAt) ? updatedAt : Date.now();
+            const previousUpdatedAt = knownHandoffUpdateByChatId.get(chatId);
+
+            activeChatIds.add(chatId);
+            knownHandoffUpdateByChatId.set(chatId, normalizedUpdatedAt);
+
+            if (
+              shouldTrackNew &&
+              hasLoadedHandoffs &&
+              (previousUpdatedAt === undefined || normalizedUpdatedAt > previousUpdatedAt)
+            ) {
+              notifiedHandoffChatIds.add(chatId);
+            }
+          }
+
+          for (const trackedChatId of Array.from(notifiedHandoffChatIds)) {
+            if (!activeChatIds.has(trackedChatId)) {
+              notifiedHandoffChatIds.delete(trackedChatId);
+            }
+          }
+
+          hasLoadedHandoffs = true;
+          updateHandoffNotice(notifiedHandoffChatIds.size);
+        }
 
         // Handoffs management
-        async function loadHandoffs() {
+        async function loadHandoffs(trackNotifications = false) {
           const tbody = document.getElementById("handoffs-tbody");
           if (!tbody) return;
+
+          if (handoffsRequestInFlight) {
+            return;
+          }
+
+          handoffsRequestInFlight = true;
   
           try {
-            const response = await fetch("/admin/handoffs");
+            const response = await fetch("/admin/handoffs", { cache: "no-store" });
             if (!response.ok) throw new Error("Failed to load handoffs");
             const sessions = await response.json();
+            syncHandoffNotifications(sessions, trackNotifications);
   
             if (sessions.length === 0) {
               tbody.innerHTML = '<tr><td colspan="4" style="text-align: center; color: #6f5c47;">No hay conversaciones derivadas</td></tr>';
@@ -735,6 +825,8 @@ function renderAdminPage(
             }).join("");
           } catch (error) {
             tbody.innerHTML = '<tr><td colspan="4" style="text-align: center; color: #8a2f24;">Error al cargar conversaciones derivadas</td></tr>';
+          } finally {
+            handoffsRequestInFlight = false;
           }
         }
   
@@ -749,7 +841,7 @@ function renderAdminPage(
               }
             });
             if (!response.ok) throw new Error("Failed to reactivate");
-            await loadHandoffs();
+            await loadHandoffs(false);
           } catch (error) {
             alert("Error al reactivar la conversacion");
           }
@@ -760,12 +852,15 @@ function renderAdminPage(
             .replaceAll("&", "&amp;")
             .replaceAll("<", "&lt;")
             .replaceAll(">", "&gt;")
-            .replaceAll("\"", "&quot;")
+            .replaceAll('"', "&quot;")
             .replaceAll("'", "&#39;");
         }
   
         // Load handoffs on page load
-        loadHandoffs();
+        void loadHandoffs();
+        setInterval(() => {
+          void loadHandoffs(true);
+        }, 2000);
   
         // Existing editor functionality
         function closeAllEditors() {

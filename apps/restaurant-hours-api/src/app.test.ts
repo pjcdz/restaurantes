@@ -183,3 +183,152 @@ describe("POST /message", () => {
     });
   });
 });
+
+describe("GET /admin authentication defaults", () => {
+  function buildAdminRepository() {
+    return {
+      getAdminData: vi.fn().mockResolvedValue({
+        products: [],
+        faq: []
+      }),
+      getHandedOffSessions: vi.fn().mockResolvedValue([]),
+      reactivateSession: vi.fn().mockResolvedValue(undefined),
+      upsertCatalogItem: vi.fn().mockResolvedValue(undefined),
+      deleteCatalogItem: vi.fn().mockResolvedValue(undefined),
+      upsertFaqEntry: vi.fn().mockResolvedValue(undefined),
+      deleteFaqEntry: vi.fn().mockResolvedValue(undefined)
+    };
+  }
+
+  it("does not require Authorization header in development by default", async () => {
+    const originalNodeEnv = process.env.NODE_ENV;
+    const originalJwtSecret = process.env.JWT_SECRET;
+
+    try {
+      process.env.NODE_ENV = "development";
+      process.env.JWT_SECRET = "test-jwt-secret";
+
+      const app = createApp({ adminRepository: buildAdminRepository() });
+      const response = await request(app).get("/admin");
+
+      expect(response.status).toBe(200);
+      expect(response.type).toMatch(/html/);
+    } finally {
+      if (originalNodeEnv === undefined) {
+        delete process.env.NODE_ENV;
+      } else {
+        process.env.NODE_ENV = originalNodeEnv;
+      }
+
+      if (originalJwtSecret === undefined) {
+        delete process.env.JWT_SECRET;
+      } else {
+        process.env.JWT_SECRET = originalJwtSecret;
+      }
+    }
+  });
+
+  it("requires Authorization header in production by default", async () => {
+    const originalNodeEnv = process.env.NODE_ENV;
+    const originalJwtSecret = process.env.JWT_SECRET;
+    const originalAllowedOrigins = process.env.ALLOWED_ORIGINS;
+
+    try {
+      process.env.NODE_ENV = "production";
+      process.env.JWT_SECRET = "test-jwt-secret";
+      process.env.ALLOWED_ORIGINS = "https://admin.example.com";
+
+      const app = createApp({ adminRepository: buildAdminRepository() });
+      const response = await request(app)
+        .get("/admin")
+        .set("Origin", "https://admin.example.com");
+
+      expect(response.status).toBe(401);
+      expect(response.body).toEqual({
+        error: "Authorization header is required.",
+        code: "MISSING_TOKEN"
+      });
+    } finally {
+      if (originalNodeEnv === undefined) {
+        delete process.env.NODE_ENV;
+      } else {
+        process.env.NODE_ENV = originalNodeEnv;
+      }
+
+      if (originalJwtSecret === undefined) {
+        delete process.env.JWT_SECRET;
+      } else {
+        process.env.JWT_SECRET = originalJwtSecret;
+      }
+
+      if (originalAllowedOrigins === undefined) {
+        delete process.env.ALLOWED_ORIGINS;
+      } else {
+        process.env.ALLOWED_ORIGINS = originalAllowedOrigins;
+      }
+    }
+  });
+});
+
+describe("GET /admin local access and rendering policy", () => {
+  function buildAdminRepository() {
+    return {
+      getAdminData: vi.fn().mockResolvedValue({
+        products: [],
+        faq: []
+      }),
+      getHandedOffSessions: vi.fn().mockResolvedValue([]),
+      reactivateSession: vi.fn().mockResolvedValue(undefined),
+      upsertCatalogItem: vi.fn().mockResolvedValue(undefined),
+      deleteCatalogItem: vi.fn().mockResolvedValue(undefined),
+      upsertFaqEntry: vi.fn().mockResolvedValue(undefined),
+      deleteFaqEntry: vi.fn().mockResolvedValue(undefined)
+    };
+  }
+
+  it("rejects admin access when Host is not localhost", async () => {
+    const originalNodeEnv = process.env.NODE_ENV;
+
+    try {
+      process.env.NODE_ENV = "development";
+      const app = createApp({ adminRepository: buildAdminRepository() });
+
+      const response = await request(app)
+        .get("/admin")
+        .set("Host", "admin.example.com");
+
+      expect(response.status).toBe(403);
+      expect(response.body).toEqual({
+        error: "Admin panel is only available from localhost."
+      });
+    } finally {
+      if (originalNodeEnv === undefined) {
+        delete process.env.NODE_ENV;
+      } else {
+        process.env.NODE_ENV = originalNodeEnv;
+      }
+    }
+  });
+
+  it("serves admin HTML with CSP that allows inline styles and scripts", async () => {
+    const originalNodeEnv = process.env.NODE_ENV;
+
+    try {
+      process.env.NODE_ENV = "development";
+      const app = createApp({ adminRepository: buildAdminRepository() });
+
+      const response = await request(app).get("/admin");
+      const csp = String(response.headers["content-security-policy"] ?? "");
+
+      expect(response.status).toBe(200);
+      expect(csp).toContain("style-src 'self' 'unsafe-inline'");
+      expect(csp).toContain("script-src 'self' 'unsafe-inline'");
+    } finally {
+      if (originalNodeEnv === undefined) {
+        delete process.env.NODE_ENV;
+      } else {
+        process.env.NODE_ENV = originalNodeEnv;
+      }
+    }
+  });
+});

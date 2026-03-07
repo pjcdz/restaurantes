@@ -10,14 +10,22 @@ import {
   type ConversationRepository,
   type ConversationSessionRecord
 } from "./conversation-assistant.js";
+import { setFallbackSessionStatus } from "./handoff-session-store.js";
 
 const convexApi = anyApi as Record<string, any>;
 const EXTRA_FIELD_ERROR_PATTERN = /Object contains extra field [`"']?([a-zA-Z0-9_]+)[`"']?/u;
+const MISSING_FUNCTION_PATTERN = /Could not find public function for ['`]([^'"`]+)['`]/u;
 
 function extractUnsupportedField(error: unknown): string | null {
   const message = error instanceof Error ? error.message : String(error);
   const match = message.match(EXTRA_FIELD_ERROR_PATTERN);
   return match?.[1] ?? null;
+}
+
+function isMissingPublicFunction(error: unknown, functionName: string): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  const match = message.match(MISSING_FUNCTION_PATTERN);
+  return match?.[1] === functionName;
 }
 
 export class ConvexConversationRepository implements ConversationRepository {
@@ -126,12 +134,23 @@ export class ConvexConversationRepository implements ConversationRepository {
     chatId: string,
     status: "active" | "handed_off" | "paused"
   ): Promise<void> {
-    await ConvexCircuitBreaker.execute(async () => {
-      await this.client.mutation(convexApi.conversations.updateSessionStatus, {
-        chatId,
-        status
+    try {
+      await ConvexCircuitBreaker.execute(async () => {
+        await this.client.mutation(convexApi.conversations.updateSessionStatus, {
+          chatId,
+          status
+        });
       });
-    });
+      setFallbackSessionStatus(chatId, status);
+      return;
+    } catch (error) {
+      if (isMissingPublicFunction(error, "conversations:updateSessionStatus")) {
+        setFallbackSessionStatus(chatId, status);
+        return;
+      }
+
+      throw error;
+    }
   }
 
   async getActivePaymentConfig(): Promise<ConversationPaymentConfig | null> {

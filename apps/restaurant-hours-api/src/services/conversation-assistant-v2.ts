@@ -13,6 +13,7 @@ import {
   detectPaymentIntent,
   extractPaymentAmount,
   generatePaymentMethodsResponse,
+  generatePaymentAmountRequestResponse,
   generateChangeResponse,
   generateOrderConfirmationResponse as generateOrderConfirmationPayment,
   validatePaymentAmount,
@@ -381,13 +382,15 @@ function cloneOrderDraftV2(
   chatId: string
 ): ConversationOrderDraftV2 {
   if (currentOrderDraft) {
+    const draftV2 = currentOrderDraft as ConversationOrderDraftV2;
+
     return {
       ...currentOrderDraft,
       items: currentOrderDraft.items.map((item) => ({
         ...item
       })),
-      cartAction: currentOrderDraft.cartAction || "add",
-      previousCart: currentOrderDraft.previousCart || []
+      cartAction: draftV2.cartAction || "add",
+      previousCart: draftV2.previousCart || []
     } as ConversationOrderDraftV2;
   }
 

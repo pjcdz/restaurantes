@@ -1,4 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  listFallbackHandedOffSessions,
+  resetFallbackHandedOffSessions
+} from "./handoff-session-store.js";
 
 const mockMutation = vi.fn();
 const mockQuery = vi.fn();
@@ -33,6 +37,7 @@ import { ConvexConversationRepository } from "./convex-conversation-repository.j
 describe("ConvexConversationRepository compatibility retries", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    resetFallbackHandedOffSessions();
   });
 
   it("retries saveCheckpoint without unsupported metadata field", async () => {
@@ -110,5 +115,24 @@ describe("ConvexConversationRepository compatibility retries", () => {
     expect(mockMutation.mock.calls[0]?.[1]).toHaveProperty("montoAbono");
     expect(mockMutation.mock.calls[1]?.[1]).not.toHaveProperty("montoAbono");
     expect(result.montoAbono).toBeNull();
+  });
+
+  it("stores handoff status in local fallback when updateSessionStatus is unavailable", async () => {
+    const repository = new ConvexConversationRepository("https://convex.test");
+
+    mockMutation.mockRejectedValueOnce(
+      new Error(
+        "[Request ID: test] Server Error Could not find public function for 'conversations:updateSessionStatus'."
+      )
+    );
+
+    await repository.updateSessionStatus("5493870000000", "handed_off");
+
+    expect(listFallbackHandedOffSessions()).toEqual([
+      expect.objectContaining({
+        chatId: "5493870000000",
+        phoneNumber: null
+      })
+    ]);
   });
 });
