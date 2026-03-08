@@ -6,17 +6,61 @@ import {
   type CatalogSnapshot,
   type ConversationCheckpoint,
   type ConversationOrderRecord,
+  type ConversationPaymentConfig,
   type ConversationRepository,
   type ConversationSessionRecord
 } from "./conversation-assistant.js";
+import { setFallbackSessionStatus } from "./handoff-session-store.js";
 
 const convexApi = anyApi as Record<string, any>;
+const EXTRA_FIELD_ERROR_PATTERN = /Object contains extra field [`"']?([a-zA-Z0-9_]+)[`"']?/u;
+const MISSING_FUNCTION_PATTERN = /Could not find public function for ['`]([^'"`]+)['`]/u;
+
+function extractUnsupportedField(error: unknown): string | null {
+  const message = error instanceof Error ? error.message : String(error);
+  const match = message.match(EXTRA_FIELD_ERROR_PATTERN);
+  return match?.[1] ?? null;
+}
+
+function isMissingPublicFunction(error: unknown, functionName: string): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  const match = message.match(MISSING_FUNCTION_PATTERN);
+  return match?.[1] === functionName;
+}
 
 export class ConvexConversationRepository implements ConversationRepository {
   private readonly client: ConvexHttpClient;
 
   constructor(url: string) {
     this.client = new ConvexHttpClient(url);
+  }
+
+  private async mutateWithCompatibilityRetry<T>(
+    mutation: unknown,
+    input: Record<string, unknown>
+  ): Promise<T> {
+    let payload = { ...input };
+    const removedFields = new Set<string>();
+
+    while (true) {
+      try {
+        return (await this.client.mutation(mutation as any, payload as any)) as T;
+      } catch (error) {
+        const unsupportedField = extractUnsupportedField(error);
+
+        if (
+          !unsupportedField ||
+          removedFields.has(unsupportedField) ||
+          !(unsupportedField in payload)
+        ) {
+          throw error;
+        }
+
+        removedFields.add(unsupportedField);
+        const { [unsupportedField]: _removed, ...nextPayload } = payload;
+        payload = nextPayload;
+      }
+    }
   }
 
   async upsertSessionByChatId(chatId: string): Promise<ConversationSessionRecord> {
@@ -47,10 +91,10 @@ export class ConvexConversationRepository implements ConversationRepository {
     input: Omit<ConversationCheckpoint, "id">
   ): Promise<ConversationCheckpoint> {
     return (await ConvexCircuitBreaker.execute(async () => {
-      return (await this.client.mutation(
+      return await this.mutateWithCompatibilityRetry<ConversationCheckpoint>(
         convexApi.conversations.saveCheckpoint,
-        input
-      )) as ConversationCheckpoint;
+        input as unknown as Record<string, unknown>
+      );
     }));
   }
 
@@ -74,10 +118,15 @@ export class ConvexConversationRepository implements ConversationRepository {
     input: Omit<ConversationOrderRecord, "createdAt" | "id" | "updatedAt">
   ): Promise<ConversationOrderRecord> {
     return (await ConvexCircuitBreaker.execute(async () => {
-      return (await this.client.mutation(
+      const persistedOrder = await this.mutateWithCompatibilityRetry<ConversationOrderRecord>(
         convexApi.conversations.upsertPedidoForSession,
-        input
-      )) as ConversationOrderRecord;
+        input as unknown as Record<string, unknown>
+      );
+
+      return {
+        ...persistedOrder,
+        montoAbono: persistedOrder.montoAbono ?? null
+      };
     }));
   }
 
@@ -85,11 +134,31 @@ export class ConvexConversationRepository implements ConversationRepository {
     chatId: string,
     status: "active" | "handed_off" | "paused"
   ): Promise<void> {
-    await ConvexCircuitBreaker.execute(async () => {
-      await this.client.mutation(convexApi.conversations.updateSessionStatus, {
-        chatId,
-        status
+    try {
+      await ConvexCircuitBreaker.execute(async () => {
+        await this.client.mutation(convexApi.conversations.updateSessionStatus, {
+          chatId,
+          status
+        });
       });
-    });
+      setFallbackSessionStatus(chatId, status);
+      return;
+    } catch (error) {
+      if (isMissingPublicFunction(error, "conversations:updateSessionStatus")) {
+        setFallbackSessionStatus(chatId, status);
+        return;
+      }
+
+      throw error;
+    }
+  }
+
+  async getActivePaymentConfig(): Promise<ConversationPaymentConfig | null> {
+    return (await ConvexCircuitBreaker.execute(async () => {
+      return (await this.client.query(
+        convexApi.payments.getActivePaymentConfig,
+        {}
+      )) as ConversationPaymentConfig | null;
+    }));
   }
 }

@@ -11,6 +11,16 @@ export default defineSchema({
       v.literal("active"),
       v.literal("handed_off"),
       v.literal("paused")
+    ),
+    // SRS v4: Campos para handoff
+    handedOffAt: v.optional(v.number()),
+    handedOffReason: v.optional(
+      v.union(
+        v.literal("user_requested"),
+        v.literal("frustration_detected"),
+        v.literal("error_repetition"),
+        v.literal("complaint")
+      )
     )
   })
     .index("by_chatId", ["chatId"])
@@ -19,6 +29,12 @@ export default defineSchema({
     sessionId: v.id("sessions"),
     threadId: v.string(),
     checkpoint: v.string(),
+    // SRS v4: Mejoras para checkpointer V2
+    versions: v.optional(v.string()),
+    versionsSeen: v.optional(v.string()),
+    metadata: v.optional(v.string()),
+    ts: v.string(),
+    namespace: v.string(),
     createdAt: v.number()
   }).index("by_sessionId", ["sessionId"]),
   pedidos: defineTable({
@@ -36,6 +52,7 @@ export default defineSchema({
     metodoPago: v.union(v.string(), v.null()),
     nombreCliente: v.union(v.string(), v.null()),
     total: v.number(),
+    montoAbono: v.optional(v.number()),
     estado: v.union(
       v.literal("completo"),
       v.literal("error_producto"),
@@ -71,5 +88,19 @@ export default defineSchema({
     userId: v.string(),
     version: v.number(),
     updatedAt: v.number()
-  }).index("by_userId", ["userId"])
+  }).index("by_userId", ["userId"]),
+  // SRS v4: Configuración de pagos
+  payment_config: defineTable({
+    metodos: v.array(v.string()),
+    efectivoMinimo: v.number(),
+    transferenciaBanco: v.string(),
+    transferenciaAlias: v.string(),
+    transferenciaCBU: v.string(),
+    transferenciaCUIT: v.optional(v.string()),
+    entregaPago: v.union(
+      v.literal("con_entrega"),
+      v.literal("adelantado")
+    ),
+    activo: v.boolean()
+  }).index("by_activo", ["activo"])
 });

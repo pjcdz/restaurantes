@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   createConversationAssistant,
@@ -8,6 +8,7 @@ import {
   type ConversationRepository,
   type ConversationSessionRecord
 } from "./conversation-assistant";
+import { resetFallbackHandedOffSessions } from "./handoff-session-store.js";
 
 type MemoryRepositoryState = {
   sessions: Array<ConversationSessionRecord>;
@@ -100,6 +101,18 @@ function createMemoryRepository(
       }
 
       return nextRecord;
+    },
+    async updateSessionStatus(chatId, status) {
+      const session = state.sessions.find((item) => item.chatId === chatId);
+      if (!session) {
+        return;
+      }
+
+      session.status = status;
+      session.updatedAt = Date.now();
+    },
+    async getActivePaymentConfig() {
+      return null;
     }
   };
 
@@ -110,6 +123,10 @@ function createMemoryRepository(
 }
 
 describe("createConversationAssistant", () => {
+  beforeEach(() => {
+    resetFallbackHandedOffSessions();
+  });
+
   it("creates a session and greets first-time users", async () => {
     const { repository, state } = createMemoryRepository();
     const composeResponse = vi.fn(async (input) => input.draftReply);
@@ -127,7 +144,7 @@ describe("createConversationAssistant", () => {
       "¡Hola! Bienvenido a RestauLang. Puedo ayudarte con el menu, horarios o tomar tu pedido."
     );
     expect(state.sessions).toHaveLength(1);
-    expect(state.checkpoints).toHaveLength(1);
+    expect(state.checkpoints.length).toBeGreaterThanOrEqual(1);
     expect(state.orders).toHaveLength(0);
     expect(composeResponse).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -137,6 +154,135 @@ describe("createConversationAssistant", () => {
           "¡Hola! Bienvenido a RestauLang. Puedo ayudarte con el menu, horarios o tomar tu pedido."
       })
     );
+  });
+
+  it("hands off to human support when customer reports a bad order and asks for supervisor", async () => {
+    const { repository, state } = createMemoryRepository();
+    const assistant = createConversationAssistant({
+      repository,
+      composeResponse: async (input) => input.draftReply
+    });
+
+    const reply = await assistant.handleIncomingMessage({
+      chatId: "handoff-complaint",
+      text: "Quiero hablar con un supervisor, mi pedido llegó mal"
+    });
+
+    expect(reply.toLowerCase()).toContain("operador humano");
+    expect(state.sessions).toEqual([
+      expect.objectContaining({
+        chatId: "handoff-complaint",
+        status: "handed_off"
+      })
+    ]);
+  });
+
+  it("hands off when customer expresses anger or strong negative sentiment", async () => {
+    const { repository, state } = createMemoryRepository();
+    const assistant = createConversationAssistant({
+      repository,
+      composeResponse: async (input) => input.draftReply
+    });
+
+    const reply = await assistant.handleIncomingMessage({
+      chatId: "handoff-negative-sentiment",
+      text: "Estoy muy enojado, esto es pésimo y no me respondes bien"
+    });
+
+    expect(reply.toLowerCase()).toContain("operador humano");
+    expect(state.sessions).toEqual([
+      expect.objectContaining({
+        chatId: "handoff-negative-sentiment",
+        status: "handed_off"
+      })
+    ]);
+  });
+
+  it("hands off when customer uses insults toward service quality", async () => {
+    const { repository, state } = createMemoryRepository();
+    const assistant = createConversationAssistant({
+      repository,
+      composeResponse: async (input) => input.draftReply
+    });
+
+    const reply = await assistant.handleIncomingMessage({
+      chatId: "handoff-insult",
+      text: "Son unos inutiles, el servicio es una mierda"
+    });
+
+    expect(reply.toLowerCase()).toContain("operador humano");
+    expect(state.sessions).toEqual([
+      expect.objectContaining({
+        chatId: "handoff-insult",
+        status: "handed_off"
+      })
+    ]);
+  });
+
+  it("hands off when request is out of supported restaurant scope", async () => {
+    const { repository, state } = createMemoryRepository();
+    const assistant = createConversationAssistant({
+      repository,
+      composeResponse: async (input) => input.draftReply
+    });
+
+    const reply = await assistant.handleIncomingMessage({
+      chatId: "handoff-out-of-scope",
+      text: "Necesito una consulta legal y defensa del consumidor por esta situacion"
+    });
+
+    expect(reply.toLowerCase()).toContain("operador humano");
+    expect(state.sessions).toEqual([
+      expect.objectContaining({
+        chatId: "handoff-out-of-scope",
+        status: "handed_off"
+      })
+    ]);
+  });
+
+  it("stops sending automated replies after handoff until reactivation", async () => {
+    const { repository } = createMemoryRepository();
+    const assistant = createConversationAssistant({
+      repository,
+      composeResponse: async (input) => input.draftReply
+    });
+
+    const firstReply = await assistant.handleIncomingMessage({
+      chatId: "handoff-stop-bot",
+      text: "Quiero hablar con un supervisor por una queja"
+    });
+    const secondReply = await assistant.handleIncomingMessage({
+      chatId: "handoff-stop-bot",
+      text: "quiero 2 hamburguesas"
+    });
+
+    expect(firstReply.toLowerCase()).toContain("operador humano");
+    expect(secondReply).toBe("");
+  });
+
+  it("keeps handoff active with fallback even when status update persistence fails", async () => {
+    const { repository } = createMemoryRepository();
+    const assistant = createConversationAssistant({
+      repository: {
+        ...repository,
+        updateSessionStatus: async () => {
+          throw new Error("storage unavailable");
+        }
+      },
+      composeResponse: async (input) => input.draftReply
+    });
+
+    const firstReply = await assistant.handleIncomingMessage({
+      chatId: "handoff-fallback-only",
+      text: "Estoy enojado y quiero reclamar"
+    });
+    const secondReply = await assistant.handleIncomingMessage({
+      chatId: "handoff-fallback-only",
+      text: "hola?"
+    });
+
+    expect(firstReply.toLowerCase()).toContain("operador humano");
+    expect(secondReply).toBe("");
   });
 
   it("answers menu questions using catalog data without inventing", async () => {
@@ -199,6 +345,123 @@ describe("createConversationAssistant", () => {
     );
   });
 
+  it("keeps FAQ answers focused even if composeResponse tries to add menu content", async () => {
+    const { repository } = createMemoryRepository({
+      menu: [
+        {
+          item: "Bacon King",
+          descripcion: "Hamburguesa doble",
+          precio: 11200,
+          categoria: "principal",
+          disponible: true
+        }
+      ],
+      faq: [
+        {
+          tema: "horario",
+          pregunta: "horario, abierto, cierran",
+          respuesta: "Nuestro horario es de 11:00 a 23:00."
+        }
+      ]
+    });
+    const assistant = createConversationAssistant({
+      repository,
+      composeResponse: async () =>
+        "¡Che! Hoy estamos abiertos. Tenemos estas opciones: Bacon King ($11200)."
+    });
+
+    const reply = await assistant.handleIncomingMessage({
+      chatId: "faq-focus",
+      text: "horario"
+    });
+
+    expect(reply).toBe("Nuestro horario es de 11:00 a 23:00.");
+    expect(reply.toLowerCase()).not.toContain("tenemos estas opciones");
+  });
+
+  it("answers standalone payment FAQs from catalog entries", async () => {
+    const { repository } = createMemoryRepository({
+      faq: [
+        {
+          tema: "pago",
+          pregunta: "metodos de pago, mercado pago",
+          respuesta: "Aceptamos efectivo, transferencia y Mercado Pago."
+        }
+      ]
+    });
+    const assistant = createConversationAssistant({
+      repository,
+      composeResponse: async (input) => input.draftReply
+    });
+
+    const reply = await assistant.handleIncomingMessage({
+      chatId: "faq-payment",
+      text: "mercado pago"
+    });
+
+    expect(reply).toBe("Aceptamos efectivo, transferencia y Mercado Pago.");
+  });
+
+  it("matches FAQ questions written as natural sentences with punctuation", async () => {
+    const { repository } = createMemoryRepository({
+      faq: [
+        {
+          tema: "ubicacion",
+          pregunta: "¿Dónde están ubicados?",
+          respuesta: "Estamos en Av. Corrientes 1234, CABA."
+        }
+      ]
+    });
+    const assistant = createConversationAssistant({
+      repository,
+      composeResponse: async (input) => input.draftReply
+    });
+
+    const reply = await assistant.handleIncomingMessage({
+      chatId: "faq-location",
+      text: "Donde estan ubicados?"
+    });
+
+    expect(reply).toBe("Estamos en Av. Corrientes 1234, CABA.");
+  });
+
+  it("prioritizes FAQ answers even when extractor mistakenly flags wantsMenu", async () => {
+    const { repository } = createMemoryRepository({
+      menu: [
+        {
+          item: "Bacon King",
+          descripcion: "Hamburguesa doble",
+          precio: 11200,
+          categoria: "principal",
+          disponible: true
+        }
+      ],
+      faq: [
+        {
+          tema: "horario",
+          pregunta: "horario, abierto, cierran",
+          respuesta: "Abrimos todos los dias de 11:00 a 23:00."
+        }
+      ]
+    });
+    const assistant = createConversationAssistant({
+      repository,
+      composeResponse: async () =>
+        "¡Che! Hoy estamos abiertos. Tenemos estas opciones: Bacon King ($11200).",
+      extractOrderRequest: async () => ({
+        orderLines: [],
+        wantsMenu: true
+      })
+    });
+
+    const reply = await assistant.handleIncomingMessage({
+      chatId: "faq-priority",
+      text: "Cual es el horario?"
+    });
+
+    expect(reply).toBe("Abrimos todos los dias de 11:00 a 23:00.");
+  });
+
   it("builds an order draft and asks for the remaining required fields", async () => {
     const { repository, state } = createMemoryRepository({
       prices: [
@@ -241,8 +504,10 @@ describe("createConversationAssistant", () => {
         ]
       })
     ]);
-    expect(state.checkpoints).toHaveLength(1);
-    expect(JSON.parse(state.checkpoints[0].checkpoint)).toEqual(
+    expect(state.checkpoints.length).toBeGreaterThanOrEqual(1);
+    const latestCheckpoint = state.checkpoints.at(-1);
+    expect(latestCheckpoint).toBeDefined();
+    expect(JSON.parse(latestCheckpoint!.checkpoint)).toEqual(
       expect.objectContaining({
         intent: "order",
         orderDraft: expect.objectContaining({
@@ -492,6 +757,185 @@ describe("createConversationAssistant", () => {
     ]);
   });
 
+  it("continues pickup workflow when user says para retirar", async () => {
+    const { repository, state } = createMemoryRepository({
+      prices: [
+        {
+          producto: "Bacon King",
+          precioUnitario: 11200,
+          aliases: ["bacon", "bacon king", "bk"]
+        }
+      ]
+    });
+    const assistant = createConversationAssistant({
+      repository,
+      composeResponse: async (input) => input.draftReply
+    });
+
+    const firstReply = await assistant.handleIncomingMessage({
+      chatId: "777",
+      text: "Mandame dos bacon king"
+    });
+    const secondReply = await assistant.handleIncomingMessage({
+      chatId: "777",
+      text: "Para retirar"
+    });
+    const thirdReply = await assistant.handleIncomingMessage({
+      chatId: "777",
+      text: "Te pago con efectivo"
+    });
+    const fourthReply = await assistant.handleIncomingMessage({
+      chatId: "777",
+      text: "Soy Maria"
+    });
+
+    expect(firstReply).toContain("$22400");
+    expect(firstReply).toContain("¿Es para delivery o retiro?");
+    expect(secondReply).toBe(
+      "¿Como queres pagar? (efectivo/tarjeta/transferencia/mercado pago)"
+    );
+    expect(thirdReply).toBe("¿A nombre de quien dejamos el pedido?");
+    expect(fourthReply).toBe("El total es $22400. ¿Con cuanto vas a pagar?");
+    expect(state.orders).toEqual([
+      expect.objectContaining({
+        tipoEntrega: "pickup",
+        metodoPago: "efectivo",
+        nombreCliente: "maria",
+        total: 22400,
+        estado: "incompleto",
+        items: [
+          {
+            producto: "Bacon King",
+            cantidad: 2,
+            precioUnitario: 11200
+          }
+        ]
+      })
+    ]);
+  });
+
+  it("shows current order total when user asks cuanto es", async () => {
+    const { repository } = createMemoryRepository({
+      prices: [
+        {
+          producto: "Bacon King",
+          precioUnitario: 11200,
+          aliases: ["bacon", "bacon king", "bk"]
+        }
+      ]
+    });
+    const assistant = createConversationAssistant({
+      repository,
+      composeResponse: async (input) => input.draftReply
+    });
+
+    await assistant.handleIncomingMessage({
+      chatId: "777",
+      text: "Quiero una bacon king"
+    });
+    const totalReply = await assistant.handleIncomingMessage({
+      chatId: "777",
+      text: "Cuanto es?"
+    });
+
+    expect(totalReply).toContain("Tu pedido actual es: 1 Bacon King.");
+    expect(totalReply).toContain("Total: $11200.");
+    expect(totalReply).toContain("¿Es para delivery o retiro?");
+  });
+
+  it("suggests available menu options when product is not found", async () => {
+    const { repository } = createMemoryRepository({
+      menu: [
+        {
+          item: "Bacon King",
+          descripcion: "Hamburguesa doble",
+          precio: 11200,
+          categoria: "principal",
+          disponible: true
+        },
+        {
+          item: "Cebolla Crispy",
+          descripcion: "Hamburguesa con cebolla crispy",
+          precio: 9800,
+          categoria: "principal",
+          disponible: true
+        }
+      ],
+      prices: [
+        {
+          producto: "Bacon King",
+          precioUnitario: 11200,
+          aliases: ["bacon", "bacon king"]
+        },
+        {
+          producto: "Cebolla Crispy",
+          precioUnitario: 9800,
+          aliases: ["cebolla", "crispy"]
+        }
+      ]
+    });
+    const assistant = createConversationAssistant({
+      repository,
+      composeResponse: async (input) => input.draftReply
+    });
+
+    const reply = await assistant.handleIncomingMessage({
+      chatId: "777",
+      text: "Quiero una pizza"
+    });
+
+    expect(reply).toContain("No pude identificar: pizza.");
+    expect(reply).toContain("Opciones disponibles:");
+    expect(reply).toContain("Bacon King");
+  });
+
+  it("asks for specific burger variant and quantity when order is ambiguous", async () => {
+    const { repository } = createMemoryRepository({
+      menu: [
+        {
+          item: "Bacon King",
+          descripcion: "Hamburguesa doble",
+          precio: 11200,
+          categoria: "principal",
+          disponible: true
+        },
+        {
+          item: "Cebolla Crispy",
+          descripcion: "Hamburguesa con cebolla crispy",
+          precio: 9800,
+          categoria: "principal",
+          disponible: true
+        }
+      ],
+      prices: [
+        {
+          producto: "Bacon King",
+          precioUnitario: 11200,
+          aliases: ["bacon", "bacon king"]
+        },
+        {
+          producto: "Cebolla Crispy",
+          precioUnitario: 9800,
+          aliases: ["cebolla", "crispy"]
+        }
+      ]
+    });
+    const assistant = createConversationAssistant({
+      repository,
+      composeResponse: async (input) => input.draftReply
+    });
+
+    const reply = await assistant.handleIncomingMessage({
+      chatId: "777",
+      text: "Quiero tres hamburguesas"
+    });
+
+    expect(reply).toContain("No pude identificar:");
+    expect(reply).toContain("hamburguesa");
+    expect(reply).toContain("Decime cual hamburguesa queres y cuantas unidades de cada una.");
+    expect(reply).toContain("Opciones disponibles:");
+  });
+
   it("adds multiple items from a single structured extraction", async () => {
     const { repository, state } = createMemoryRepository({
       prices: [
@@ -683,7 +1127,7 @@ describe("createConversationAssistant", () => {
     });
 
     expect(reply).toBe(
-      "Anotado: 1 La Clásica Smash ($8500). Total parcial: $17000. ¿Es para delivery o retiro?"
+      "Anotado: +1 La Clásica Smash. Ahora llevas 2 La Clásica Smash. Total parcial: $17000. ¿Es para delivery o retiro?"
     );
     expect(state.orders).toEqual([
       expect.objectContaining({

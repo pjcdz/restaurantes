@@ -1,16 +1,35 @@
 import { Annotation, END, START, StateGraph } from "@langchain/langgraph";
+import type { RunnableConfig } from "@langchain/core/runnables";
 
 import {
   createRuleBasedOrderExtractionAgent,
   type ExtractedOrderLine,
   type ExtractOrderRequest
 } from "./order-extraction.js";
+import { ConvexCheckpointer } from "../langgraph/convex-checkpointer.js";
+import { createConvexCheckpointerV2 } from "../langgraph/convex-checkpointer-v2.js";
 import {
   calculateChange,
   calculateLineSubtotal,
   calculateOrderTotals,
   InsufficientPaymentError
 } from "./order-calculator.js";
+import {
+  detectPaymentIntent,
+  extractPaymentAmount as extractPaymentAmountFromPaymentHandler,
+  generateChangeResponse,
+  generateInsufficientAmountResponse,
+  generateOrderConfirmationResponse as generateOrderConfirmationPayment,
+  generatePaymentMethodsResponse,
+  type PaymentConfig
+} from "./payment-handler.js";
+import {
+  applyCartAction,
+  detectCartAction,
+  detectOrderCancellation,
+  validateCartActionForState,
+  type CartAction
+} from "./order-schema-v2.js";
 import {
   createConversationTraceContext,
   createTracedNodeExecutor,
@@ -20,6 +39,10 @@ import {
   setTraceOutput,
   type ConversationTraceContext
 } from "./conversation-tracing.js";
+import {
+  isFallbackSessionHandedOff,
+  setFallbackSessionStatus
+} from "./handoff-session-store.js";
 import { degradationHandler } from "../resilience/graceful-degradation.js";
 import { CircuitOpenError } from "../resilience/circuit-breaker.js";
 import { Logger } from "../utils/logger.js";
@@ -29,7 +52,7 @@ import { Logger } from "../utils/logger.js";
  */
 const logger = new Logger({ service: "conversation-assistant" });
 
-export type ConversationIntent = "complaint" | "faq" | "greeting" | "order";
+export type ConversationIntent = "complaint" | "faq" | "greeting" | "order" | "payment";
 
 export type ConversationSessionRecord = {
   id: string;
@@ -45,8 +68,15 @@ export type ConversationCheckpoint = {
   sessionId: string;
   threadId: string;
   checkpoint: string;
+  ts?: string;
+  versions?: string;
+  versionsSeen?: string;
+  metadata?: string;
+  namespace?: string;
   createdAt: number;
 };
+
+export type ConversationPaymentConfig = PaymentConfig;
 
 export type CatalogMenuRecord = {
   item: string;
@@ -115,6 +145,7 @@ export type ConversationRepository = {
    * @param status - The new status ('active', 'handed_off', 'paused')
    */
   updateSessionStatus(chatId: string, status: "active" | "handed_off" | "paused"): Promise<void>;
+  getActivePaymentConfig(): Promise<ConversationPaymentConfig | null>;
 };
 
 export type ComposeResponseInput = {
@@ -207,7 +238,11 @@ const ConversationState = Annotation.Root({
   draftReply: Annotation<string>,
   responseText: Annotation<string>,
   threadId: Annotation<string>,
-  traceContext: Annotation<ConversationTraceContext | null>
+  traceContext: Annotation<ConversationTraceContext | null>,
+  suppressReply: Annotation<boolean>,
+  // SRS v4: Campos para carrito acumulativo
+  cartAction: Annotation<"add" | "remove" | "replace" | "clear" | undefined>,
+  previousCart: Annotation<Array<ConversationOrderItem> | undefined>
 });
 
 type ConversationGraphState = typeof ConversationState.State;
@@ -224,16 +259,19 @@ export function createConversationAssistant(options: {
   const extractOrderRequest =
     options.extractOrderRequest ?? createRuleBasedOrderExtractionAgent();
   const executeNode = async <T>(
-    state: ConversationGraphState,
+    state: ConversationGraphState | undefined,
     nodeName: string,
     fn: () => Promise<T>
   ): Promise<T> => {
-    if (!state.traceContext) {
+    if (!state?.traceContext) {
       return fn();
     }
 
     return createTracedNodeExecutor(state.traceContext).execute(nodeName, fn);
   };
+
+  // Create Convex checkpointer for automatic state persistence
+  const checkpointer = new ConvexCheckpointer(options.repository);
 
   const graph = new StateGraph(ConversationState)
     .addNode("load_session", async (state) =>
@@ -267,6 +305,11 @@ export function createConversationAssistant(options: {
         orderHandlerNode(options.repository, state)
       )
     )
+    .addNode("payment_handler", async (state) =>
+      executeNode(state, "payment_handler", async () =>
+        paymentHandlerNode(options.repository, state)
+      )
+    )
     .addNode("duplicate_handler", async (state) =>
       executeNode(state, "duplicate_handler", async () => ({
         draftReply: state.duplicateResponseText
@@ -282,6 +325,12 @@ export function createConversationAssistant(options: {
         draftReply: HANDOFF_RESPONSE
       }))
     )
+    .addNode("silence_handoff", async (state) =>
+      executeNode(state, "silence_handoff", async () => ({
+        draftReply: "",
+        suppressReply: true
+      }))
+    )
     .addNode("format_response", async (state) =>
       executeNode(state, "format_response", async () =>
         formatResponseNode(composeResponse, state)
@@ -290,7 +339,7 @@ export function createConversationAssistant(options: {
     .addEdge(START, "load_session")
     .addEdge("load_session", "check_handed_off")
     .addConditionalEdges("check_handed_off", routeByHandedOffStatus, {
-      handed_off: "handoff_handler",
+      handed_off: "silence_handoff",
       continue: "analyze_message"
     })
     .addConditionalEdges("analyze_message", routeByIntent, {
@@ -298,17 +347,20 @@ export function createConversationAssistant(options: {
       duplicate: "duplicate_handler",
       faq: "faq_handler",
       greeting: "greeting_handler",
-      order: "resolve_order_request"
+      order: "resolve_order_request",
+      payment: "payment_handler"
     })
     .addEdge("greeting_handler", "format_response")
     .addEdge("faq_handler", "format_response")
     .addEdge("resolve_order_request", "order_handler")
     .addEdge("order_handler", "format_response")
+    .addEdge("payment_handler", "format_response")
     .addEdge("duplicate_handler", "format_response")
     .addEdge("complaint_handler", "handoff_handler")
     .addEdge("handoff_handler", "format_response")
+    .addEdge("silence_handoff", "format_response")
     .addEdge("format_response", END)
-    .compile();
+    .compile({ checkpointer });
 
   const handleIncomingMessageDetailed = async (
     input: { chatId: string; text: string; tracingEnvironment?: string }
@@ -330,53 +382,54 @@ export function createConversationAssistant(options: {
     });
 
     try {
-      const result = await graph.invoke({
-        chatId: input.chatId,
-        messageText: input.text,
-        session: null,
-        catalog: null,
-        intent: null,
-        requestedActions: [],
-        wantsMenu: false,
-        extractedOrderLines: [],
-        validatedOrderLines: [],
-        invalidOrderLines: [],
-        orderDraft: null,
-        isDuplicate: false,
-        isHandedOff: false,
-        duplicateResponseText: "",
-        lastHandledMessage: null,
-        lastHandledAt: null,
-        lastResponseText: "",
-        draftReply: "",
-        responseText: "",
-        threadId: buildThreadId(input.chatId),
-        traceContext
-      });
+      // Load session BEFORE invoking the graph for proper checkpointer integration
+      const session = await executeNode(undefined, "upsert_session", () =>
+        options.repository.upsertSessionByChatId(input.chatId)
+      );
 
-      const session = requireSession(result.session);
+      const threadId = buildThreadId(input.chatId);
+      const graphConfig: RunnableConfig = {
+        configurable: {
+          thread_id: threadId,
+          session_id: session.id  // Pass session_id for checkpointer
+        }
+      };
+
+      const result = await graph.invoke(
+        {
+          chatId: input.chatId,
+          messageText: input.text,
+          session,
+          threadId,
+          traceContext
+        } as unknown as ConversationGraphState,
+        graphConfig
+      );
+
       const finalResponse = result.responseText || result.draftReply;
-      const checkpointTimestamp = Date.now();
 
-      await options.repository.saveCheckpoint({
-        sessionId: session.id,
-        threadId: result.threadId,
-        checkpoint: JSON.stringify({
-          intent: result.intent,
-          lastHandledAt: result.isDuplicate
-            ? result.lastHandledAt
-            : checkpointTimestamp,
-          lastHandledMessage: result.isDuplicate
-            ? result.lastHandledMessage
-            : normalizeText(input.text),
-          lastResponseText: result.isDuplicate
-            ? result.lastResponseText || finalResponse
-            : finalResponse,
-          orderDraft: result.orderDraft,
-          threadId: result.threadId
-        } satisfies PersistedConversationState),
-        createdAt: checkpointTimestamp
-      });
+      // Note: Checkpoint is now saved automatically by LangGraph checkpointer
+      // We only need to update the order draft if needed (separate table in Convex)
+      if (
+        result.orderDraft &&
+        (result.orderDraft.items.length > 0 || result.cartAction === "clear")
+      ) {
+        const orderDraft = result.orderDraft;
+        await executeNode(undefined, "upsert_order", () =>
+          options.repository.upsertOrderForSession({
+            telefono: orderDraft.telefono,
+            items: orderDraft.items,
+            direccion: orderDraft.direccion,
+            tipoEntrega: orderDraft.tipoEntrega,
+            metodoPago: orderDraft.metodoPago,
+            nombreCliente: orderDraft.nombreCliente,
+            total: orderDraft.total,
+            estado: orderDraft.estado,
+            montoAbono: orderDraft.montoAbono,
+            sessionId: session.id
+          })
+        );
+      }
 
       setTraceOutput(traceContext, {
         reply: finalResponse,
@@ -403,12 +456,16 @@ export function createConversationAssistant(options: {
         });
 
         const normalizedText = normalizeText(input.text);
-        const intent = isGreetingMessage(normalizedText)
-          ? "greeting" as ConversationIntent
+        const fallbackIntent: "complaint" | "faq" | "greeting" = isGreetingMessage(normalizedText)
+          ? "greeting"
           : isComplaintMessage(normalizedText)
-            ? "complaint" as ConversationIntent
-            : "faq" as ConversationIntent;
-        const fallbackResponse = degradationHandler.handleCircuitOpen("convex", intent, input.text);
+            ? "complaint"
+            : "faq";
+        const fallbackResponse = degradationHandler.handleCircuitOpen(
+          "convex",
+          fallbackIntent,
+          input.text
+        );
 
         setTraceOutput(traceContext, {
           reply: fallbackResponse,
@@ -477,11 +534,13 @@ function routeByHandedOffStatus(
 
 function checkHandedOffNode(state: ConversationGraphState) {
   const session = requireSession(state.session);
+  const isFallbackHandedOff = isFallbackSessionHandedOff(state.chatId);
 
-  if (session.status === "handed_off") {
+  if (session.status === "handed_off" || isFallbackHandedOff) {
     logger.info("Session is handed_off, ignoring message", undefined, {
       sessionId: session.id,
-      chatId: state.chatId
+      chatId: state.chatId,
+      source: session.status === "handed_off" ? "convex" : "fallback"
     });
 
     return {
@@ -499,9 +558,19 @@ async function complaintHandlerNode(
   state: ConversationGraphState
 ) {
   const session = requireSession(state.session);
+  setFallbackSessionStatus(state.chatId, "handed_off");
 
-  // Update session status to handed_off in Convex
-  await repository.updateSessionStatus(state.chatId, "handed_off");
+  try {
+    // Update session status to handed_off in Convex.
+    await repository.updateSessionStatus(state.chatId, "handed_off");
+  } catch (error) {
+    logger.error(
+      "Failed to persist handed_off status, continuing with human handoff response",
+      error instanceof Error ? error : new Error(String(error)),
+      undefined,
+      { sessionId: session.id, chatId: state.chatId }
+    );
+  }
 
   logger.info("Session handed off for human intervention", undefined, {
     sessionId: session.id
@@ -531,6 +600,7 @@ async function loadSessionNode(
     lastResponseText: persistedState.lastResponseText ?? "",
     orderDraft: persistedState.orderDraft,
     session,
+    suppressReply: false,
     threadId: persistedState.threadId ?? latestCheckpoint?.threadId ?? buildThreadId(state.chatId)
   };
 }
@@ -586,17 +656,46 @@ async function analyzeMessageNode(
     messageText: state.messageText,
     orderDraft: state.orderDraft
   });
+  const cartAction = detectCartAction(normalizedText);
+  const cancellation = detectOrderCancellation(normalizedText);
   const extractedOrderLines = isDetailOnlyOrderMessage(normalizedText, state.orderDraft)
     ? []
     : extraction.orderLines;
   const shouldUpdateOrder =
-    extractedOrderLines.length > 0 || isOrderFollowUpMessage(normalizedText, state.orderDraft);
+    extractedOrderLines.length > 0 ||
+    isOrderFollowUpMessage(normalizedText, state.orderDraft) ||
+    cancellation.isCancellation ||
+    (cartAction === "clear" && Boolean(state.orderDraft));
+  const faqMatch = findFaqMatch(catalog.faq, normalizedText);
+  const shouldForceFaqRoute =
+    Boolean(faqMatch) &&
+    !shouldUpdateOrder &&
+    !isMenuRequest(normalizedText);
+
+  if (shouldForceFaqRoute) {
+    return {
+      duplicateResponseText: "",
+      extractedOrderLines: [],
+      intent: "faq" as const,
+      invalidOrderLines: [],
+      isDuplicate: false,
+      requestedActions: ["answer_faq"],
+      validatedOrderLines: [],
+      wantsMenu: false
+    };
+  }
+
+  const paymentIntent = shouldUpdateOrder ? null : detectPaymentIntent(state.messageText);
 
   return {
     duplicateResponseText: "",
     extractedOrderLines,
     isDuplicate: false,
-    intent: shouldUpdateOrder ? ("order" as const) : ("faq" as const),
+    intent: shouldUpdateOrder
+      ? ("order" as const)
+      : paymentIntent
+        ? ("payment" as const)
+        : ("faq" as const),
     invalidOrderLines: [],
     requestedActions: buildRequestedActions(extraction.wantsMenu, shouldUpdateOrder),
     validatedOrderLines: [],
@@ -697,19 +796,76 @@ async function orderHandlerNode(
   repository: ConversationRepository,
   state: ConversationGraphState
 ) {
+  const catalog = requireCatalog(state.catalog);
   const session = requireSession(state.session);
   const orderDraft = cloneOrderDraft(state.orderDraft, state.chatId);
   const normalizedText = normalizeText(state.messageText);
+  const cartAction = detectCartAction(normalizedText);
+  const cancellation = detectOrderCancellation(normalizedText);
   const hasIncomingLines = state.extractedOrderLines.length > 0;
+  const previousCart = orderDraft.items.map((item) => ({ ...item }));
+  const suggestedProducts = catalog.menu
+    .filter((item) => item.disponible)
+    .map((item) => item.item)
+    .slice(0, 3);
+
+  if (cancellation.isCancellation || cartAction === "clear") {
+    if (orderDraft.items.length === 0) {
+      return {
+        cartAction: "clear" as const,
+        draftReply: "No tenes un pedido activo para cancelar. ¿Queres empezar uno nuevo?",
+        orderDraft,
+        previousCart
+      };
+    }
+
+    orderDraft.items = [];
+    orderDraft.total = 0;
+    orderDraft.estado = "incompleto";
+    orderDraft.direccion = null;
+    orderDraft.tipoEntrega = null;
+    orderDraft.metodoPago = null;
+    orderDraft.nombreCliente = null;
+    orderDraft.montoAbono = null;
+
+    return {
+      cartAction: "clear" as const,
+      draftReply: "Tu pedido fue cancelado. ¿Queres comenzar de nuevo?",
+      orderDraft,
+      previousCart
+    };
+  }
 
   if (state.validatedOrderLines.length > 0) {
-    mergeOrderItemsTool(orderDraft, state.validatedOrderLines);
+    const validation = validateCartActionForState(cartAction, orderDraft.items);
+    if (!validation.valid && cartAction !== "add" && cartAction !== "replace") {
+      return {
+        cartAction,
+        draftReply: validation.reason ?? "No pude aplicar esa accion sobre el carrito.",
+        orderDraft,
+        previousCart
+      };
+    }
+
+    const incomingItems: Array<ConversationOrderItem> = state.validatedOrderLines.map((line) => ({
+      cantidad: line.quantity,
+      precioUnitario: line.precioUnitario,
+      producto: line.matchedProduct
+    }));
+
+    orderDraft.items = applyCartAction(
+      orderDraft.items,
+      incomingItems,
+      cartAction
+    ) as Array<ConversationOrderItem>;
   }
 
   if (!hasIncomingLines && orderDraft.items.length === 0) {
     return {
+      cartAction,
       draftReply: "Decime que producto queres pedir y lo preparo.",
-      orderDraft
+      orderDraft,
+      previousCart
     };
   }
 
@@ -718,11 +874,14 @@ async function orderHandlerNode(
 
     return {
       draftReply: buildOrderReply({
+        cartAction,
         invalidOrderLines: state.invalidOrderLines,
         orderDraft,
+        suggestedProducts,
         validatedOrderLines: []
       }),
-      orderDraft
+      orderDraft,
+      previousCart
     };
   }
 
@@ -735,14 +894,136 @@ async function orderHandlerNode(
       ...orderDraft,
       sessionId: session.id
     });
+
+    if (
+      !hasIncomingLines &&
+      state.invalidOrderLines.length === 0 &&
+      isOrderTotalInquiry(normalizedText)
+    ) {
+      return {
+        draftReply: buildOrderTotalReply(orderDraft),
+        orderDraft,
+        previousCart
+      };
+    }
   }
 
   return {
     draftReply: buildOrderReply({
+      cartAction,
       invalidOrderLines: state.invalidOrderLines,
       orderDraft,
+      suggestedProducts,
       validatedOrderLines: state.validatedOrderLines
     }),
+    orderDraft,
+    previousCart
+  };
+}
+
+async function paymentHandlerNode(
+  repository: ConversationRepository,
+  state: ConversationGraphState
+) {
+  const paymentIntent = detectPaymentIntent(state.messageText);
+  const orderDraft = state.orderDraft
+    ? cloneOrderDraft(state.orderDraft, state.chatId)
+    : null;
+  const hasActiveOrder = Boolean(orderDraft && orderDraft.items.length > 0);
+  const normalizedMessage = normalizeText(state.messageText);
+
+  if (
+    !hasActiveOrder &&
+    (paymentIntent === null ||
+      paymentIntent === "payment_methods" ||
+      paymentIntent === "payment_question")
+  ) {
+    const catalog = requireCatalog(state.catalog);
+    const faqMatch = findFaqMatch(catalog.faq, normalizedMessage);
+
+    if (faqMatch) {
+      return {
+        draftReply: faqMatch.respuesta
+      };
+    }
+  }
+
+  const paymentConfig = repository.getActivePaymentConfig
+    ? await repository.getActivePaymentConfig()
+    : null;
+
+  if (!paymentIntent) {
+    return {
+      draftReply: paymentConfig
+        ? generatePaymentMethodsResponse(paymentConfig)
+        : "Aceptamos efectivo y transferencia. Si queres, te paso los datos."
+    };
+  }
+
+  if (paymentIntent === "payment_methods" || paymentIntent === "payment_question") {
+    if (
+      orderDraft &&
+      orderDraft.items.length > 0 &&
+      orderDraft.metodoPago === "efectivo" &&
+      orderDraft.montoAbono === null
+    ) {
+      return {
+        draftReply: `El total de tu pedido es $${orderDraft.total}. ¿Con cuanto vas a pagar?`
+      };
+    }
+
+    return {
+      draftReply: paymentConfig
+        ? generatePaymentMethodsResponse(paymentConfig)
+        : "Aceptamos efectivo y transferencia. Si queres, te paso los datos."
+    };
+  }
+
+  if (!orderDraft || orderDraft.items.length === 0) {
+    return {
+      draftReply: "Necesito un pedido activo para continuar con el pago. ¿Querés hacer un pedido?"
+    };
+  }
+
+  if (paymentIntent === "payment_amount") {
+    const paymentAmount = extractPaymentAmountFromPaymentHandler(state.messageText);
+
+    if (paymentAmount === null) {
+      return {
+        draftReply: "No pude identificar el monto. Decime con cuanto vas a pagar y lo calculo."
+      };
+    }
+
+    if (paymentAmount < orderDraft.total) {
+      return {
+        draftReply: generateInsufficientAmountResponse(orderDraft.total, paymentAmount)
+      };
+    }
+
+    orderDraft.montoAbono = paymentAmount;
+    orderDraft.estado = determineOrderStatus(orderDraft);
+    const session = requireSession(state.session);
+
+    await repository.upsertOrderForSession({
+      ...orderDraft,
+      sessionId: session.id
+    });
+
+    return {
+      draftReply: generateChangeResponse(orderDraft.total, paymentAmount, paymentConfig ?? undefined),
+      orderDraft
+    };
+  }
+
+  if (orderDraft.estado !== "completo") {
+    return {
+      draftReply: buildOrderFollowUp(orderDraft),
+      orderDraft
+    };
+  }
+
+  return {
+    draftReply: generateOrderConfirmationPayment(orderDraft, paymentConfig ?? undefined),
     orderDraft
   };
 }
@@ -753,11 +1034,30 @@ async function formatResponseNode(
 ) {
   const session = requireSession(state.session);
   const intent = state.intent ?? "faq";
+  const isDirectFaqResponse =
+    intent === "faq" &&
+    state.requestedActions.includes("answer_faq") &&
+    !state.wantsMenu;
+  const normalizedMessage = normalizeText(state.messageText);
+  const buildResponseUpdate = (responseText: string) => ({
+    lastHandledAt: Date.now(),
+    lastHandledMessage: normalizedMessage,
+    lastResponseText: responseText,
+    responseText
+  });
 
-  if (state.isDuplicate || intent === "order") {
-    return {
-      responseText: state.draftReply
-    };
+  if (state.suppressReply) {
+    return buildResponseUpdate("");
+  }
+
+  if (
+    state.isDuplicate ||
+    intent === "order" ||
+    intent === "payment" ||
+    intent === "complaint" ||
+    isDirectFaqResponse
+  ) {
+    return buildResponseUpdate(state.draftReply);
   }
 
   const responseText = await composeResponse({
@@ -769,19 +1069,37 @@ async function formatResponseNode(
     session
   });
 
-  return {
-    responseText: responseText.trim() || state.draftReply
-  };
+  return buildResponseUpdate(responseText.trim() || state.draftReply);
 }
 
 function buildOrderReply(input: {
+  cartAction: CartAction;
   validatedOrderLines: Array<ResolvedOrderLine>;
   invalidOrderLines: Array<InvalidOrderLine>;
   orderDraft: ConversationOrderDraft;
+  suggestedProducts: Array<string>;
 }): string {
   const segments: Array<string> = [];
 
-  if (input.validatedOrderLines.length === 1 && input.invalidOrderLines.length === 0) {
+  if (
+    input.cartAction === "remove" &&
+    input.validatedOrderLines.length > 0 &&
+    input.invalidOrderLines.length === 0
+  ) {
+    const removedItems = input.validatedOrderLines
+      .map((line) => `${line.quantity} ${line.matchedProduct}`)
+      .join(", ");
+    segments.push(`Quitado: ${removedItems}.`);
+  } else if (
+    input.cartAction === "replace" &&
+    input.validatedOrderLines.length > 0 &&
+    input.invalidOrderLines.length === 0
+  ) {
+    const replacedItems = input.validatedOrderLines
+      .map((line) => `${line.quantity} ${line.matchedProduct} ($${line.subtotal})`)
+      .join(", ");
+    segments.push(`Actualizado: ${replacedItems}. Total parcial: $${input.orderDraft.total}.`);
+  } else if (input.validatedOrderLines.length === 1 && input.invalidOrderLines.length === 0) {
     const line = input.validatedOrderLines[0];
     const updatedItem = input.orderDraft.items.find(
       (item) => item.producto === line.matchedProduct
@@ -791,9 +1109,18 @@ function buildOrderReply(input: {
       (updatedItem?.cantidad ?? line.quantity) > line.quantity;
 
     if (shouldShowAccumulatedTotal) {
-      segments.push(
-        `Anotado: ${line.quantity} ${line.matchedProduct} ($${line.subtotal}). Total parcial: $${input.orderDraft.total}.`
-      );
+      const accumulatedQuantity = updatedItem?.cantidad ?? line.quantity;
+      const isIncrementOnExistingItem = accumulatedQuantity > line.quantity;
+
+      if (isIncrementOnExistingItem) {
+        segments.push(
+          `Anotado: +${line.quantity} ${line.matchedProduct}. Ahora llevas ${accumulatedQuantity} ${line.matchedProduct}. Total parcial: $${input.orderDraft.total}.`
+        );
+      } else {
+        segments.push(
+          `Anotado: ${line.quantity} ${line.matchedProduct} ($${line.subtotal}). Total parcial: $${input.orderDraft.total}.`
+        );
+      }
     } else {
       segments.push(
         `Anotado: ${line.quantity} ${line.requestedProduct} ($${line.precioUnitario} c/u = $${line.subtotal}).`
@@ -815,10 +1142,28 @@ function buildOrderReply(input: {
     const missingItems = input.invalidOrderLines
       .map((line) => line.requestedProduct)
       .join(", ");
+    const shouldAskVariantAndQuantity =
+      input.orderDraft.items.length === 0 &&
+      input.invalidOrderLines.some((line) =>
+        includesAny(normalizeText(line.requestedProduct), ["hamburguesa", "burger"])
+      );
 
-    segments.push(
-      `No pude identificar: ${missingItems}. Decime a que producto te referis y lo sumo.`
-    );
+    if (
+      shouldAskVariantAndQuantity &&
+      input.suggestedProducts.length > 0
+    ) {
+      segments.push(
+        `No pude identificar: ${missingItems}. Decime cual hamburguesa queres y cuantas unidades de cada una. Opciones disponibles: ${input.suggestedProducts.join(", ")}.`
+      );
+    } else if (input.orderDraft.items.length === 0 && input.suggestedProducts.length > 0) {
+      segments.push(
+        `No pude identificar: ${missingItems}. Decime a que producto te referis y lo sumo. Opciones disponibles: ${input.suggestedProducts.join(", ")}.`
+      );
+    } else {
+      segments.push(
+        `No pude identificar: ${missingItems}. Decime a que producto te referis y lo sumo.`
+      );
+    }
   }
 
   if (input.orderDraft.items.length === 0) {
@@ -915,8 +1260,124 @@ function includesAny(input: string, words: Array<string>): boolean {
   return words.some((word) => input.includes(word));
 }
 
+const DIRECT_HANDOFF_KEYWORDS = [
+  "humano",
+  "persona",
+  "operador",
+  "supervisor",
+  "gerente",
+  "encargado",
+  "responsable"
+];
+
+const COMPLAINT_KEYWORDS = [
+  "queja",
+  "reclamo",
+  "denuncia",
+  "problema grave",
+  "mal servicio",
+  "mala atencion"
+];
+
+const ORDER_CONTEXT_KEYWORDS = ["pedido", "orden", "comida", "delivery", "envio"];
+const ORDER_ISSUE_KEYWORDS = [
+  "llego mal",
+  "vino mal",
+  "llego frio",
+  "vino frio",
+  "incompleto",
+  "faltan",
+  "falta",
+  "demora",
+  "tardo",
+  "tarde"
+];
+
+const NEGATIVE_SENTIMENT_KEYWORDS = [
+  "enojado",
+  "enojada",
+  "molesto",
+  "molesta",
+  "furioso",
+  "furiosa",
+  "indignado",
+  "indignada",
+  "harto",
+  "harta",
+  "pesimo",
+  "decepcionado",
+  "decepcionada"
+];
+
+const FRUSTRATION_PATTERNS = [
+  "no me respondes bien",
+  "no me respondes",
+  "no me ayudas",
+  "ya te pregunte",
+  "te pregunte 3 veces"
+];
+
+const INSULT_KEYWORDS = [
+  "idiota",
+  "estupido",
+  "inutil",
+  "pelotudo",
+  "pelotuda",
+  "boludo",
+  "boluda",
+  "forro",
+  "mierda",
+  "hijo de puta",
+  "hija de puta",
+  "hdp"
+];
+
+const OUT_OF_SCOPE_HUMAN_HANDOFF_KEYWORDS = [
+  "fuera de lo establecido",
+  "fuera de tema",
+  "otro tema",
+  "nada que ver con comida",
+  "consulta legal",
+  "defensa del consumidor",
+  "demanda",
+  "abogado",
+  "fiscalia",
+  "denuncia formal"
+];
+
 function isComplaintMessage(normalizedText: string): boolean {
-  return includesAny(normalizedText, ["queja", "reclamo", "humano", "persona", "operador"]);
+  if (!normalizedText) {
+    return false;
+  }
+
+  if (includesAny(normalizedText, DIRECT_HANDOFF_KEYWORDS)) {
+    return true;
+  }
+
+  if (includesAny(normalizedText, COMPLAINT_KEYWORDS)) {
+    return true;
+  }
+
+  const hasOrderContext = includesAny(normalizedText, ORDER_CONTEXT_KEYWORDS);
+  const hasOrderIssue = includesAny(normalizedText, ORDER_ISSUE_KEYWORDS);
+
+  if (hasOrderContext && hasOrderIssue) {
+    return true;
+  }
+
+  if (includesAny(normalizedText, NEGATIVE_SENTIMENT_KEYWORDS)) {
+    return true;
+  }
+
+  if (includesAny(normalizedText, FRUSTRATION_PATTERNS)) {
+    return true;
+  }
+
+  if (includesAny(normalizedText, INSULT_KEYWORDS)) {
+    return true;
+  }
+
+  return includesAny(normalizedText, OUT_OF_SCOPE_HUMAN_HANDOFF_KEYWORDS);
 }
 
 function isGreetingMessage(normalizedText: string): boolean {
@@ -936,6 +1397,7 @@ function isOrderFollowUpMessage(
       "delivery",
       "envio",
       "retiro",
+      "retirar",
       "pickup",
       "paso a buscar",
       "efectivo",
@@ -955,6 +1417,10 @@ function isOrderFollowUpMessage(
     return true;
   }
 
+  if (isOrderTotalInquiry(normalizedText)) {
+    return true;
+  }
+
   if (!orderDraft.nombreCliente && looksLikeNameOnlyMessage(normalizedText)) {
     return true;
   }
@@ -969,6 +1435,15 @@ function isOrderFollowUpMessage(
   }
 
   return Boolean(/\d/.test(normalizedText) && orderDraft.tipoEntrega === "delivery");
+}
+
+function isOrderTotalInquiry(normalizedText: string): boolean {
+  return includesAny(normalizedText, [
+    "cuanto es",
+    "cuanto sale",
+    "cuanto cuesta",
+    "total"
+  ]);
 }
 
 function isDetailOnlyOrderMessage(
@@ -1040,14 +1515,22 @@ function findFaqMatch(
   entries: Array<CatalogFaqRecord>,
   normalizedText: string
 ): CatalogFaqRecord | null {
+  const normalizedQuery = normalizeFaqMatchText(normalizedText);
+
+  if (!normalizedQuery) {
+    return null;
+  }
+
   for (const entry of entries) {
-    const terms = buildFaqTerms(entry);
+    const terms = buildFaqTerms(entry)
+      .map((term) => normalizeFaqMatchText(term))
+      .filter(Boolean);
 
     if (
       terms.some(
         (term) =>
-          containsWholePhrase(normalizedText, term) ||
-          containsWholePhrase(term, normalizedText)
+          containsWholePhrase(normalizedQuery, term) ||
+          containsWholePhrase(term, normalizedQuery)
       )
     ) {
       return entry;
@@ -1059,8 +1542,9 @@ function findFaqMatch(
 
 function buildFaqTerms(entry: CatalogFaqRecord): Array<string> {
   const normalizedTopic = normalizeText(entry.tema);
-  const questionTerms = normalizeText(entry.pregunta)
-    .split(",")
+  const normalizedQuestion = normalizeText(entry.pregunta);
+  const questionTerms = normalizedQuestion
+    .split(/[,.!?;:]/u)
     .map((term) => term.trim())
     .filter(Boolean);
   const uniqueTerms = new Set<string>();
@@ -1069,11 +1553,22 @@ function buildFaqTerms(entry: CatalogFaqRecord): Array<string> {
     uniqueTerms.add(normalizedTopic);
   }
 
+  if (normalizedQuestion) {
+    uniqueTerms.add(normalizedQuestion);
+  }
+
   for (const term of questionTerms) {
     uniqueTerms.add(term);
   }
 
   return Array.from(uniqueTerms);
+}
+
+function normalizeFaqMatchText(value: string): string {
+  return normalizeText(value)
+    .replace(/[^a-z0-9\s]/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim();
 }
 
 function findMatchingPriceEntry(
@@ -1246,7 +1741,7 @@ function updateOrderDraftWithMessage(
     orderDraft.tipoEntrega = "delivery";
   }
 
-  if (includesAny(normalizedText, ["retiro", "pickup", "paso a buscar"])) {
+  if (includesAny(normalizedText, ["retiro", "retirar", "pickup", "paso a buscar"])) {
     orderDraft.tipoEntrega = "pickup";
   }
 
@@ -1297,38 +1792,11 @@ function updateOrderDraftWithMessage(
   // Extract montoAbono (payment amount) for cash payments
   // Only parse when metodoPago is "efectivo" and montoAbono is not yet set
   if (orderDraft.metodoPago === "efectivo" && orderDraft.montoAbono === null) {
-    const paymentAmount = extractPaymentAmount(normalizedText);
+    const paymentAmount = extractPaymentAmountFromPaymentHandler(normalizedText);
     if (paymentAmount !== null) {
       orderDraft.montoAbono = paymentAmount;
     }
   }
-}
-
-/**
- * Extracts a payment amount from a normalized text message.
- * Looks for patterns like "con 500", "pago 1000", "tengo 200", or just a number.
- * @param normalizedText - The normalized message text
- * @returns The extracted amount or null if not found
- */
-function extractPaymentAmount(normalizedText: string): number | null {
-  // Pattern 1: "con X", "pago X", "tengo X", "abono X"
-  const withPrefixMatch = normalizedText.match(
-    /(?:con|pago|tengo|abono|son)\s+(\d+(?:\.\d+)?)/u
-  );
-  if (withPrefixMatch?.[1]) {
-    return parseFloat(withPrefixMatch[1]);
-  }
-
-  // Pattern 2: Just a number (if the message is simple enough)
-  // Only match if the message is primarily a number with optional currency symbols
-  const simpleNumberMatch = normalizedText.match(
-    /^(?:\$?\s*)?(\d+(?:\.\d+)?)(?:\s*(?:pesos|ars|\$))?$/u
-  );
-  if (simpleNumberMatch?.[1]) {
-    return parseFloat(simpleNumberMatch[1]);
-  }
-
-  return null;
 }
 
 function looksLikeNameOnlyMessage(normalizedText: string): boolean {
@@ -1349,6 +1817,7 @@ function looksLikeNameOnlyMessage(normalizedText: string): boolean {
       "delivery",
       "envio",
       "retiro",
+      "retirar",
       "pickup",
       "paso a buscar",
       "efectivo",
@@ -1459,8 +1928,22 @@ function buildOrderFollowUp(orderDraft: ConversationOrderDraft): string {
   return `¡Listo! Tu pedido: ${itemsSummary}, ${deliverySummary}. Total: $${orderDraft.total}.`;
 }
 
+function buildOrderTotalReply(orderDraft: ConversationOrderDraft): string {
+  const itemsSummary = orderDraft.items
+    .map((item) => `${item.cantidad} ${item.producto}`)
+    .join(", ");
+
+  return `Tu pedido actual es: ${itemsSummary}. Total: $${orderDraft.total}. ${buildOrderFollowUp(orderDraft)}`;
+}
+
 function isConversationIntent(value: unknown): value is ConversationIntent {
-  return value === "complaint" || value === "faq" || value === "greeting" || value === "order";
+  return (
+    value === "complaint" ||
+    value === "faq" ||
+    value === "greeting" ||
+    value === "order" ||
+    value === "payment"
+  );
 }
 
 function isConversationOrderDraft(value: unknown): value is ConversationOrderDraft {
@@ -1507,4 +1990,283 @@ function requireSession(
 
 function buildThreadId(chatId: string): string {
   return `telegram:${chatId}`;
+}
+
+/**
+ * SRS v4: Conversation Assistant V2 con mejoras de Sprint 1.
+ *
+ * Mejoras implementadas:
+ * - Checkpointer V2: Persistencia mejorada con version management
+ * - Saludo profesional
+ */
+export function createConversationAssistantV2(options: {
+  repository: ConversationRepository;
+  composeResponse?: ComposeResponse;
+  extractOrderRequest?: ExtractOrderRequest;
+}): ConversationAssistant {
+  const composeResponse = options.composeResponse ?? (async (input) => input.draftReply);
+  const extractOrderRequest =
+    options.extractOrderRequest ?? createRuleBasedOrderExtractionAgent();
+  const executeNode = async <T>(
+    state: ConversationGraphState | undefined,
+    nodeName: string,
+    fn: () => Promise<T>
+  ): Promise<T> => {
+    if (!state?.traceContext) {
+      return fn();
+    }
+
+    return createTracedNodeExecutor(state.traceContext).execute(nodeName, fn);
+  };
+
+  // SRS v4: Usar Checkpointer V2 para mejor persistencia
+  const checkpointer = createConvexCheckpointerV2(options.repository);
+
+  const graph = new StateGraph(ConversationState)
+    .addNode("load_session", async (state) =>
+      executeNode(state, "load_session", async () =>
+        loadSessionNode(options.repository, state)
+      )
+    )
+    .addNode("check_handed_off", async (state) =>
+      executeNode(state, "check_handed_off", async () =>
+        checkHandedOffNode(state)
+      )
+    )
+    .addNode("analyze_message", async (state) =>
+      executeNode(state, "analyze_message", async () =>
+        analyzeMessageNode(extractOrderRequest, state)
+      )
+    )
+    .addNode("greeting_handler", async (state) =>
+      executeNode(state, "greeting_handler", async () => ({
+        draftReply: DEFAULT_GREETING
+      }))
+    )
+    .addNode("faq_handler", async (state) =>
+      executeNode(state, "faq_handler", async () => faqHandlerNode(state))
+    )
+    .addNode("resolve_order_request", async (state) =>
+      executeNode(state, "resolve_order_request", async () => resolveOrderRequestNode(state))
+    )
+    .addNode("order_handler", async (state) =>
+      executeNode(state, "order_handler", async () =>
+        orderHandlerNode(options.repository, state)
+      )
+    )
+    .addNode("payment_handler", async (state) =>
+      executeNode(state, "payment_handler", async () =>
+        paymentHandlerNode(options.repository, state)
+      )
+    )
+    .addNode("duplicate_handler", async (state) =>
+      executeNode(state, "duplicate_handler", async () => ({
+        draftReply: state.duplicateResponseText
+      }))
+    )
+    .addNode("complaint_handler", async (state) =>
+      executeNode(state, "complaint_handler", async () =>
+        complaintHandlerNode(options.repository, state)
+      )
+    )
+    .addNode("handoff_handler", async (state) =>
+      executeNode(state, "handoff_handler", async () => ({
+        draftReply: HANDOFF_RESPONSE
+      }))
+    )
+    .addNode("silence_handoff", async (state) =>
+      executeNode(state, "silence_handoff", async () => ({
+        draftReply: "",
+        suppressReply: true
+      }))
+    )
+    .addNode("format_response", async (state) =>
+      executeNode(state, "format_response", async () =>
+        formatResponseNode(composeResponse, state)
+      )
+    )
+    .addEdge(START, "load_session")
+    .addEdge("load_session", "check_handed_off")
+    .addConditionalEdges("check_handed_off", routeByHandedOffStatus, {
+      handed_off: "silence_handoff",
+      continue: "analyze_message"
+    })
+    .addConditionalEdges("analyze_message", routeByIntentV2, {
+      complaint: "complaint_handler",
+      duplicate: "duplicate_handler",
+      faq: "faq_handler",
+      greeting: "greeting_handler",
+      order: "resolve_order_request",
+      payment: "payment_handler"
+    })
+    .addEdge("greeting_handler", "format_response")
+    .addEdge("faq_handler", "format_response")
+    .addEdge("resolve_order_request", "order_handler")
+    .addEdge("order_handler", "format_response")
+    .addEdge("payment_handler", "format_response")
+    .addEdge("duplicate_handler", "format_response")
+    .addEdge("complaint_handler", "handoff_handler")
+    .addEdge("handoff_handler", "format_response")
+    .addEdge("silence_handoff", "format_response")
+    .addEdge("format_response", END)
+    .compile({ checkpointer });
+
+  const handleIncomingMessageDetailed = async (
+    input: { chatId: string; text: string; tracingEnvironment?: string }
+  ): Promise<ConversationAssistantResult> => {
+    const traceContext = createConversationTraceContext(
+      input.chatId,
+      undefined,
+      undefined,
+      {
+        environment: input.tracingEnvironment
+      }
+    );
+    const tracedExecutor = createTracedNodeExecutor(traceContext);
+    let traceSucceeded = true;
+
+    setTraceInput(traceContext, {
+      chatId: input.chatId,
+      message: input.text
+    });
+
+    try {
+      const session = await executeNode(undefined, "upsert_session", () =>
+        options.repository.upsertSessionByChatId(input.chatId)
+      );
+
+      const threadId = buildThreadId(input.chatId);
+      const graphConfig: RunnableConfig = {
+        configurable: {
+          thread_id: threadId,
+          session_id: session.id,
+          // SRS v4: Namespace para checkpointer V2
+          namespace: "restaulang-main"
+        }
+      };
+
+      const result = await graph.invoke(
+        {
+          chatId: input.chatId,
+          messageText: input.text,
+          session,
+          threadId,
+          traceContext
+        } as unknown as ConversationGraphState,
+        graphConfig
+      );
+
+      const finalResponse = result.responseText || result.draftReply;
+
+      if (
+        result.orderDraft &&
+        (result.orderDraft.items.length > 0 || result.cartAction === "clear")
+      ) {
+        const orderDraft = result.orderDraft;
+        await executeNode(undefined, "upsert_order", () =>
+          options.repository.upsertOrderForSession({
+            telefono: orderDraft.telefono,
+            items: orderDraft.items,
+            direccion: orderDraft.direccion,
+            tipoEntrega: orderDraft.tipoEntrega,
+            metodoPago: orderDraft.metodoPago,
+            nombreCliente: orderDraft.nombreCliente,
+            total: orderDraft.total,
+            estado: orderDraft.estado,
+            montoAbono: orderDraft.montoAbono,
+            sessionId: session.id
+          })
+        );
+      }
+
+      setTraceOutput(traceContext, {
+        reply: finalResponse,
+        intent: result.intent,
+        isDuplicate: result.isDuplicate
+      });
+
+      return {
+        reply: finalResponse,
+        traceId: traceContext.otelTraceId ?? traceContext.context.traceId,
+        observationId: traceContext.rootObservationId,
+        tokens: getTraceTokenUsage(traceContext)
+      };
+    } catch (error) {
+      traceSucceeded = false;
+      const normalizedError = error instanceof Error ? error : new Error(String(error));
+      recordTraceError(traceContext, normalizedError);
+
+      if (error instanceof CircuitOpenError) {
+        logger.warn("Circuit breaker open - returning graceful degradation response", undefined, {
+          chatId: input.chatId,
+          error: { name: error.name, message: error.message }
+        });
+
+        const normalizedText = normalizeText(input.text);
+        const fallbackIntent: "complaint" | "faq" | "greeting" = isGreetingMessage(normalizedText)
+          ? "greeting"
+          : isComplaintMessage(normalizedText)
+            ? "complaint"
+            : "faq";
+        const fallbackResponse = degradationHandler.handleCircuitOpen(
+          "convex",
+          fallbackIntent,
+          input.text
+        );
+
+        setTraceOutput(traceContext, {
+          reply: fallbackResponse,
+          fallbackReason: "circuit_open",
+          error: normalizedError.message
+        });
+
+        return {
+          reply: fallbackResponse,
+          traceId: traceContext.otelTraceId ?? traceContext.context.traceId,
+          observationId: traceContext.rootObservationId,
+          tokens: getTraceTokenUsage(traceContext)
+        };
+      }
+
+      logger.error("Conversation assistant error - returning fallback response", undefined, undefined, {
+        chatId: input.chatId,
+        error: { name: normalizedError.name, message: normalizedError.message }
+      });
+
+      const fallbackResponse = degradationHandler.getFallbackResponse("faq", input.text);
+      setTraceOutput(traceContext, {
+        reply: fallbackResponse,
+        fallbackReason: "unexpected_error",
+        error: normalizedError.message
+      });
+
+      return {
+        reply: fallbackResponse,
+        traceId: traceContext.otelTraceId ?? traceContext.context.traceId,
+        observationId: traceContext.rootObservationId,
+        tokens: getTraceTokenUsage(traceContext)
+      };
+    } finally {
+      tracedExecutor.end(traceSucceeded);
+    }
+  };
+
+  return {
+    async handleIncomingMessage(input) {
+      const result = await handleIncomingMessageDetailed(input);
+      return result.reply;
+    },
+    handleIncomingMessageDetailed
+  };
+}
+
+/**
+ * SRS v4: Router de intención para el assistant V2.
+ */
+function routeByIntentV2(state: ConversationGraphState): ConversationRoute {
+  if (state.isDuplicate) {
+    return "duplicate";
+  }
+
+  return state.intent ?? "faq";
 }

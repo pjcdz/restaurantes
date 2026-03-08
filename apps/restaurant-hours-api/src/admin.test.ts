@@ -1,5 +1,6 @@
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
+import { runInNewContext } from "node:vm";
 
 import { createApp } from "./app.js";
 
@@ -106,6 +107,130 @@ describe("admin catalog routes", () => {
     expect(response.text).toContain('replaceAll("&", "&amp;")');
     expect(response.text).toContain('replaceAll("<", "&lt;")');
     expect(response.text).toContain('"X-CSRF-Token": csrfToken');
+  });
+
+  it("polls handoffs and renders a visible new-handoff notification area", async () => {
+    const adminRepository = buildAdminRepository();
+    const app = createApp({ adminRepository, skipAuth: true });
+
+    const response = await request(app).get("/admin");
+
+    expect(response.status).toBe(200);
+    expect(response.text).toContain('id="handoffs-notice"');
+    expect(response.text).toContain("Nuevas derivaciones pendientes");
+    expect(response.text).toContain("updateHandoffNotice");
+    expect(response.text).toContain("setInterval(() => {");
+    expect(response.text).toContain("void loadHandoffs(true);");
+    expect(response.text).toContain("2000");
+    expect(response.text).toContain('{ cache: "no-store" }');
+  });
+
+  it("shows a visible notice when polling detects a newly handed off conversation", async () => {
+    const adminRepository = buildAdminRepository();
+    const app = createApp({ adminRepository, skipAuth: true });
+    const response = await request(app).get("/admin");
+
+    expect(response.status).toBe(200);
+
+    const scriptMatch = response.text.match(/<script>\s*([\s\S]*?)\s*<\/script>/u);
+    expect(scriptMatch).not.toBeNull();
+    const scriptSource = scriptMatch?.[1] ?? "";
+
+    class MockElement {
+      hidden = false;
+      textContent = "";
+      innerHTML = "";
+    }
+
+    class MockTableRowElement extends MockElement {}
+
+    const handoffsTbody = new MockElement();
+    const handoffNotice = new MockElement();
+    const handoffNoticeCount = new MockElement();
+    handoffNotice.hidden = true;
+    handoffNoticeCount.textContent = "0";
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => []
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => [
+          {
+            chatId: "5493871234567",
+            phoneNumber: "5493871234567",
+            updatedAt: 1710000000000
+          }
+        ]
+      });
+
+    const intervalCallbacks: Array<() => void> = [];
+    const documentMock = {
+      getElementById: (id: string) => {
+        if (id === "handoffs-tbody") return handoffsTbody;
+        if (id === "handoffs-notice") return handoffNotice;
+        if (id === "handoffs-notice-count") return handoffNoticeCount;
+        return null;
+      },
+      querySelectorAll: () => [],
+      addEventListener: () => undefined
+    };
+
+    runInNewContext(scriptSource, {
+      fetch: fetchMock,
+      document: documentMock,
+      HTMLElement: MockElement,
+      HTMLTableRowElement: MockTableRowElement,
+      confirm: () => true,
+      alert: () => undefined,
+      setInterval: (callback: () => void) => {
+        intervalCallbacks.push(callback);
+        return 1;
+      },
+      clearInterval: () => undefined,
+      encodeURIComponent,
+      Date,
+      Map,
+      Set,
+      Number,
+      String,
+      Array
+    });
+
+    const flushAsync = async (): Promise<void> => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    };
+
+    await flushAsync();
+    await flushAsync();
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(handoffNotice.hidden).toBe(true);
+    expect(handoffNoticeCount.textContent).toBe("0");
+    expect(intervalCallbacks).toHaveLength(1);
+
+    intervalCallbacks[0]();
+    await flushAsync();
+    await flushAsync();
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(handoffNotice.hidden).toBe(false);
+    expect(handoffNoticeCount.textContent).toBe("1");
+  });
+
+  it("returns no-store cache headers for handoff polling endpoint", async () => {
+    const adminRepository = buildAdminRepository();
+    const app = createApp({ adminRepository, skipAuth: true });
+
+    const response = await request(app).get("/admin/handoffs");
+
+    expect(response.status).toBe(200);
+    expect(response.headers["cache-control"]).toBe("no-store");
+    expect(response.headers.pragma).toBe("no-cache");
+    expect(response.headers.expires).toBe("0");
   });
 
   it("renders an inline product editor with aliases", async () => {
