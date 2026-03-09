@@ -348,6 +348,35 @@ describe("createConversationAssistant", () => {
     expect(reply.toLowerCase()).not.toContain("che");
   });
 
+  it("normalizes casual openings and wording in composed responses", async () => {
+    const { repository } = createMemoryRepository({
+      menu: [
+        {
+          item: "Bacon King",
+          descripcion: "Hamburguesa doble",
+          precio: 11200,
+          categoria: "principal",
+          disponible: true
+        }
+      ]
+    });
+    const assistant = createConversationAssistant({
+      repository,
+      composeResponse: async () =>
+        "¡Dale! qué tal! Si queres, decime qué andás buscando."
+    });
+
+    const reply = await assistant.handleIncomingMessage({
+      chatId: "menu-tone-casual",
+      text: "Que tienen en el menu?"
+    });
+
+    expect(reply).toBe("Perfecto. Hola. Si queres, decime que opcion te interesa.");
+    expect(reply.toLowerCase()).not.toContain("dale");
+    expect(reply.toLowerCase()).not.toContain("que tal");
+    expect(reply.toLowerCase()).not.toContain("andas buscando");
+  });
+
   it("answers horario questions from the loaded FAQ catalog", async () => {
     const { repository } = createMemoryRepository({
       faq: [

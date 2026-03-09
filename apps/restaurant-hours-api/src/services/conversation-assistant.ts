@@ -1264,6 +1264,12 @@ function sanitizeAssistantResponse(responseText: string): string {
 
   return trimmed
     .replace(/^¡?\s*che[,!.\s]*/iu, "")
+    .replace(/^¡?\s*dale[,!.\s]*/iu, "Perfecto. ")
+    .replace(/(?:(?<=^)|(?<=[.!?]\s))(?:hey[,!.\s]*)?que tal[,!.\s]*/giu, "Hola. ")
+    .replace(/(?:(?<=^)|(?<=[.!?]\s))qué tal[,!.\s]*/giu, "Hola. ")
+    .replace(/\bque andas buscando\b/giu, "que opcion te interesa")
+    .replace(/\bqué andás buscando\b/giu, "que opcion te interesa")
+    .replace(/\s{2,}/gu, " ")
     .trim();
 }
 
