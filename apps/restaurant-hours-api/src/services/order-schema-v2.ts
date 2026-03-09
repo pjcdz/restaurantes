@@ -111,12 +111,12 @@ export function normalizeOrderText(value: string): string {
 export function detectCartAction(normalizedText: string): CartAction {
   // Palabras clave para cada acción
   const removeKeywords = [
-    "quitar", "sacar", "eliminar", "remover", "borrar", "no quiero", "no me gustas",
+    "quitar", "sacar", "sacame", "eliminar", "remover", "borrar", "no quiero", "no me gustas",
     "no quiero eso", "me equivoco", "olvid", "no lo quiero"
   ];
 
   const replaceKeywords = [
-    "cambiar", "reemplazar", "en su lugar", "en lugar", "cambio",
+    "cambiar", "cambiame", "reemplazar", "en su lugar", "en lugar", "cambio",
     "revisar", "corregir", "modificar", "editar"
   ];
 

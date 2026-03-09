@@ -11,6 +11,7 @@ function buildAdminRepository() {
       faq: []
     }),
     getHandedOffSessions: vi.fn().mockResolvedValue([]),
+    getConversationHistory: vi.fn().mockResolvedValue([]),
     reactivateSession: vi.fn().mockResolvedValue(undefined),
     upsertCatalogItem: vi.fn().mockResolvedValue(undefined),
     deleteCatalogItem: vi.fn().mockResolvedValue(undefined),
@@ -233,6 +234,45 @@ describe("admin catalog routes", () => {
     expect(response.headers.expires).toBe("0");
   });
 
+  it("returns conversation history for a handed off chat", async () => {
+    const adminRepository = buildAdminRepository();
+    adminRepository.getConversationHistory.mockResolvedValue([
+      {
+        message: "quiero una burger",
+        reply: "Anotado: 1 Bacon King.",
+        timestamp: 1710000000000
+      }
+    ]);
+    const app = createApp({ adminRepository, skipAuth: true });
+
+    const response = await request(app).get("/admin/handoffs/5493871234567/history");
+
+    expect(response.status).toBe(200);
+    expect(response.headers["cache-control"]).toBe("no-store");
+    expect(adminRepository.getConversationHistory).toHaveBeenCalledWith("5493871234567");
+    expect(response.body).toEqual([
+      {
+        message: "quiero una burger",
+        reply: "Anotado: 1 Bacon King.",
+        timestamp: 1710000000000
+      }
+    ]);
+  });
+
+  it("reactivates a handed off session through the admin endpoint", async () => {
+    const adminRepository = buildAdminRepository();
+    const app = createApp({ adminRepository, skipAuth: true, skipCsrf: true });
+
+    const response = await request(app).post("/admin/handoffs/5493871234567/reactivate");
+
+    expect(response.status).toBe(200);
+    expect(adminRepository.reactivateSession).toHaveBeenCalledWith("5493871234567");
+    expect(response.body).toEqual({
+      success: true,
+      message: "Session reactivated"
+    });
+  });
+
   it("renders an inline product editor with aliases", async () => {
     const adminRepository = buildAdminRepository();
     adminRepository.getAdminData.mockResolvedValue({
@@ -330,16 +370,16 @@ describe("admin catalog routes", () => {
       .type("form")
       .send({
         tema: "Pagos",
-        pregunta: "efectivo, mercado pago",
-        respuesta: "Aceptamos efectivo y Mercado Pago."
+        pregunta: "efectivo",
+        respuesta: "Aceptamos solo efectivo."
       });
 
     expect(response.status).toBe(302);
     expect(response.headers.location).toBe("/admin?status=success&message=FAQ+guardada.");
     expect(adminRepository.upsertFaqEntry).toHaveBeenCalledWith({
       tema: "Pagos",
-      pregunta: "efectivo, mercado pago",
-      respuesta: "Aceptamos efectivo y Mercado Pago."
+      pregunta: "efectivo",
+      respuesta: "Aceptamos solo efectivo."
     });
   });
 

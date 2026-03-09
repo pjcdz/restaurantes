@@ -22,6 +22,7 @@ vi.mock("convex/server", () => ({
       listMenuItems: "conversations:listMenuItems",
       listPriceEntries: "conversations:listPriceEntries",
       saveCheckpoint: "conversations:saveCheckpoint",
+      deletePedidoForSession: "conversations:deletePedidoForSession",
       updateSessionStatus: "conversations:updateSessionStatus",
       upsertPedidoForSession: "conversations:upsertPedidoForSession",
       upsertSessionByChatId: "conversations:upsertSessionByChatId"
@@ -134,5 +135,17 @@ describe("ConvexConversationRepository compatibility retries", () => {
         phoneNumber: null
       })
     ]);
+  });
+
+  it("deletes persisted orders by session id", async () => {
+    const repository = new ConvexConversationRepository("https://convex.test");
+    mockMutation.mockResolvedValueOnce(null);
+
+    await repository.deleteOrderForSession("session-1");
+
+    expect(mockMutation).toHaveBeenCalledWith(
+      "conversations:deletePedidoForSession",
+      { sessionId: "session-1" }
+    );
   });
 });

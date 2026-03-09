@@ -77,6 +77,12 @@ const priceValidator = v.object({
   aliases: v.array(v.string())
 });
 
+const conversationHistoryEntryValidator = v.object({
+  message: v.string(),
+  reply: v.string(),
+  timestamp: v.number()
+});
+
 const adminCatalogItemValidator = v.object({
   item: v.string(),
   descripcion: v.string(),
@@ -293,6 +299,25 @@ export const upsertPedidoForSession = mutation({
       createdAt: now,
       updatedAt: now
     };
+  }
+});
+
+export const deletePedidoForSession = mutation({
+  args: {
+    sessionId: v.id("sessions")
+  },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const existing = await ctx.db
+      .query("pedidos")
+      .withIndex("by_sessionId", (q) => q.eq("sessionId", args.sessionId))
+      .unique();
+
+    if (existing) {
+      await ctx.db.delete(existing._id);
+    }
+
+    return null;
   }
 });
 
@@ -819,5 +844,62 @@ export const listHandedOffSessions = query({
       updatedAt: session.updatedAt,
       status: "handed_off" as const
     }));
+  }
+});
+
+export const getConversationHistoryByChatId = query({
+  args: {
+    chatId: v.string()
+  },
+  returns: v.array(conversationHistoryEntryValidator),
+  handler: async (ctx, args) => {
+    const session = await ctx.db
+      .query("sessions")
+      .withIndex("by_chatId", (q) => q.eq("chatId", args.chatId))
+      .unique();
+
+    if (!session) {
+      return [];
+    }
+
+    const checkpoints = await ctx.db
+      .query("checkpoints")
+      .withIndex("by_sessionId", (q) => q.eq("sessionId", session._id))
+      .collect();
+    const seen = new Set<string>();
+    const history: Array<{ message: string; reply: string; timestamp: number }> = [];
+
+    for (const checkpoint of checkpoints.sort((left, right) => left.createdAt - right.createdAt)) {
+      try {
+        const parsed = JSON.parse(checkpoint.checkpoint) as {
+          lastHandledMessage?: unknown;
+          lastResponseText?: unknown;
+        };
+        const message =
+          typeof parsed.lastHandledMessage === "string" ? parsed.lastHandledMessage.trim() : "";
+        const reply =
+          typeof parsed.lastResponseText === "string" ? parsed.lastResponseText.trim() : "";
+
+        if (!message && !reply) {
+          continue;
+        }
+
+        const dedupeKey = `${message}\n${reply}\n${checkpoint.createdAt}`;
+        if (seen.has(dedupeKey)) {
+          continue;
+        }
+
+        seen.add(dedupeKey);
+        history.push({
+          message,
+          reply,
+          timestamp: checkpoint.createdAt
+        });
+      } catch {
+        continue;
+      }
+    }
+
+    return history;
   }
 });

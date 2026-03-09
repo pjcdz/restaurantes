@@ -336,6 +336,21 @@ export function createAdminRouter(options: AdminRouteOptions = {}) {
     }
   });
 
+  router.get("/handoffs/:chatId/history", async (request, response, next) => {
+    try {
+      response.setHeader("Cache-Control", "no-store");
+      response.setHeader("Pragma", "no-cache");
+      response.setHeader("Expires", "0");
+
+      const chatId = request.params.chatId;
+      const history = await resolveRepository().getConversationHistory(chatId);
+
+      return response.status(200).json(history);
+    } catch (error) {
+      return next(error);
+    }
+  });
+
   return router;
 }
 

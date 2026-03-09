@@ -92,7 +92,7 @@ function generateFaqTests(faqTopics: Array<string>): Array<TestCase> {
     {
       question: "Aceptan mercado pago?",
       topic: "pago",
-      expected: "Explain payment methods including mercado pago"
+      expected: "Explain that only cash is accepted for now"
     },
     {
       question: "Donde estan ubicados?",
@@ -107,7 +107,7 @@ function generateFaqTests(faqTopics: Array<string>): Array<TestCase> {
     {
       question: "Como puedo pagar?",
       topic: "pago",
-      expected: "List available payment methods"
+      expected: "Explain that only cash is accepted for now"
     }
   ];
 
@@ -119,6 +119,14 @@ function generateFaqTests(faqTopics: Array<string>): Array<TestCase> {
       messages: [q.question],
       expectedBehavior: q.expected
     });
+  });
+
+  tests.push({
+    id: "F6",
+    category: "faq",
+    description: "Combined FAQ and menu question",
+    messages: ["Cual es el horario y que tienen?"],
+    expectedBehavior: "Answer the horario FAQ first and also list menu options without losing the FAQ focus"
   });
 
   return tests;
@@ -278,6 +286,28 @@ function generateMultiOrderTests(productNames: Array<string>): Array<TestCase> {
     expectedBehavior: "Increment quantity of existing item"
   });
 
+  tests.push({
+    id: "MO4",
+    category: "multi_order",
+    description: "Remove an item from an active order",
+    messages: [
+      `Quiero una ${p1.toLowerCase()} y una ${p2.toLowerCase()}`,
+      `Sacame la ${p2.toLowerCase()}`
+    ],
+    expectedBehavior: `Remove ${p2} from the active order and keep ${p1}`
+  });
+
+  tests.push({
+    id: "MO5",
+    category: "multi_order",
+    description: "Replace the active order",
+    messages: [
+      `Quiero una ${p1.toLowerCase()}`,
+      `Cambiame por una ${p2.toLowerCase()}`
+    ],
+    expectedBehavior: `Replace the active cart with ${p2} and show the updated total`
+  });
+
   return tests;
 }
 
@@ -302,10 +332,11 @@ function generateWorkflowTests(productNames: Array<string>): Array<TestCase> {
       `Quiero una ${product.toLowerCase()}`,
       "Para delivery",
       "Mi dirección es Av. Corrientes 1234",
-      "Mercado Pago",
-      "Me llamo Juan"
+      "Pago en efectivo",
+      "Me llamo Juan",
+      "Pago con 10000"
     ],
-    expectedBehavior: "Complete order with delivery, address, payment, and customer name"
+    expectedBehavior: "Complete a cash-only order with delivery, address, customer name, and payment amount"
   });
 
   // Complete pickup workflow
@@ -317,9 +348,10 @@ function generateWorkflowTests(productNames: Array<string>): Array<TestCase> {
       `Mándame dos ${product.toLowerCase()}`,
       "Para retirar",
       "Te pago con efectivo",
-      "Soy María"
+      "Soy María",
+      "Pago con 20000"
     ],
-    expectedBehavior: "Complete order for pickup with payment and customer name"
+    expectedBehavior: "Complete a cash-only pickup order with payment and customer name"
   });
 
   // Multi-step order with additions
@@ -334,9 +366,11 @@ function generateWorkflowTests(productNames: Array<string>): Array<TestCase> {
         `Agrégame una ${product2.toLowerCase()}`,
         "Para delivery",
         "Calle Florida 500",
-        "Mercado Pago"
+        "Pago en efectivo",
+        "Soy Juan",
+        "Pago con 20000"
       ],
-      expectedBehavior: "Handle multiple additions and complete order"
+      expectedBehavior: "Handle multiple additions and complete a cash-only order"
     });
   }
 
@@ -366,6 +400,30 @@ function generateEdgeCaseTests(productNames: Array<string>): Array<TestCase> {
     messages: ["Cancelar todo"],
     expectedBehavior: "Acknowledge cancellation and clear order"
   });
+
+  if (productNames.length >= 1) {
+    tests.push({
+      id: "E6",
+      category: "edge_case",
+      description: "Cancel an active order",
+      messages: [
+        `Quiero una ${productNames[0].toLowerCase()}`,
+        "Cancelar todo"
+      ],
+      expectedBehavior: "Cancel the active order and confirm that the cart was cleared"
+    });
+
+    tests.push({
+      id: "E7",
+      category: "edge_case",
+      description: "Topic switch during an active order",
+      messages: [
+        `Quiero una ${productNames[0].toLowerCase()}`,
+        "Cual es el horario?"
+      ],
+      expectedBehavior: "Acknowledge the active order, answer the FAQ, and make clear the order can be resumed"
+    });
+  }
 
   // Check total
   if (productNames.length >= 1) {
@@ -453,7 +511,7 @@ function generatePaymentTests(productNames: Array<string>): Array<TestCase> {
     category: "payment",
     description: "Insufficient payment handling",
     messages: [
-      `Quiero un combo de $15000`,
+      `Quiero una ${product.toLowerCase()}`,
       "Tengo $10000 nada más"
     ],
     expectedBehavior: "Should inform customer payment is insufficient and show amount needed"
@@ -465,10 +523,9 @@ function generatePaymentTests(productNames: Array<string>): Array<TestCase> {
     category: "payment",
     description: "Payment method selection",
     messages: [
-      `Quiero una ${product.toLowerCase()}`,
       "¿Cómo puedo pagar?"
     ],
-    expectedBehavior: "Should list available payment methods from FAQ"
+    expectedBehavior: "Should explain that only cash is accepted"
   });
 
   tests.push({
@@ -534,6 +591,18 @@ function generateHandoffTests(): Array<TestCase> {
       "Tengo una queja formal sobre alergias alimentarias y necesito hablar con el responsable"
     ],
     expectedBehavior: "Should escalate to human agent due to serious nature of complaint"
+  });
+
+  tests.push({
+    id: "HANDOFF-05",
+    category: "handoff",
+    description: "Automatic handoff after three consecutive recoverable errors",
+    messages: [
+      "Quiero una pizza",
+      "Quiero sushi",
+      "Quiero una milanesa"
+    ],
+    expectedBehavior: "Should automatically transfer the conversation to a human after three consecutive recoverable order errors"
   });
 
   return tests;

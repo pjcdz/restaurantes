@@ -26,7 +26,7 @@ const mockCatalog: CatalogSnapshot = {
   faq: [
     { tema: "horario", pregunta: "¿Cuál es el horario?", respuesta: "Lunes a Viernes 11:00-22:00, Sábados y Domingos 12:00-23:00" },
     { tema: "ubicacion", pregunta: "¿Dónde están ubicados?", respuesta: "Av. Corrientes 1234, CABA" },
-    { tema: "pago", pregunta: "¿Qué métodos de pago aceptan?", respuesta: "Aceptamos efectivo, Mercado Pago y tarjetas de crédito/débito" },
+    { tema: "pago", pregunta: "¿Qué métodos de pago aceptan?", respuesta: "Aceptamos solo efectivo" },
     { tema: "delivery", pregunta: "¿Hacen delivery?", respuesta: "Hacemos delivery en un radio de 3km. Envío gratis en pedidos mayores a $5000" }
   ],
   prices: [
@@ -143,15 +143,21 @@ describe("AI-as-Judge Integration Tests", () => {
       
       expect(addressResult.reply).toBeTruthy();
 
-      // Step 5: Payment
-      const paymentResult = await sendMessage(baseUrl, chatId, "Pago con Mercado Pago");
-      conversation.push({ message: "Pago con Mercado Pago", reply: paymentResult.reply });
+      // Step 5: Payment method
+      const paymentResult = await sendMessage(baseUrl, chatId, "Pago en efectivo");
+      conversation.push({ message: "Pago en efectivo", reply: paymentResult.reply });
       
       expect(paymentResult.reply).toBeTruthy();
 
-      // Step 6: Confirm
-      const confirmResult = await sendMessage(baseUrl, chatId, "Confirmo el pedido");
-      conversation.push({ message: "Confirmo el pedido", reply: confirmResult.reply });
+      // Step 6: Customer name
+      const nameResult = await sendMessage(baseUrl, chatId, "Me llamo Juan");
+      conversation.push({ message: "Me llamo Juan", reply: nameResult.reply });
+      
+      expect(nameResult.reply).toBeTruthy();
+
+      // Step 7: Cash amount
+      const confirmResult = await sendMessage(baseUrl, chatId, "Pago con 10000");
+      conversation.push({ message: "Pago con 10000", reply: confirmResult.reply });
       
       expect(confirmResult.reply).toBeTruthy();
 

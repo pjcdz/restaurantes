@@ -145,6 +145,7 @@ export type ConversationRepository = {
    * @param status - The new status ('active', 'handed_off', 'paused')
    */
   updateSessionStatus(chatId: string, status: "active" | "handed_off" | "paused"): Promise<void>;
+  deleteOrderForSession?(sessionId: string): Promise<void>;
   getActivePaymentConfig(): Promise<ConversationPaymentConfig | null>;
 };
 
@@ -208,11 +209,15 @@ type PersistedConversationState = {
   lastHandledMessage: string | null;
   lastHandledAt: number | null;
   lastResponseText: string | null;
+  consecutiveErrorCount: number | null;
 };
 
 type ConversationRoute = ConversationIntent | "duplicate" | "handed_off";
 
 const DUPLICATE_MESSAGE_WINDOW_MS = 10_000;
+const DELIVERY_FEE_FALLBACK = 1500;
+const ERROR_HANDOFF_THRESHOLD = 3;
+const consecutiveErrorCounts = new Map<string, number>();
 
 const HANDOFF_RESPONSE =
   "Tu conversacion ha sido transferida a un operador humano. Te responderan a la brevedad. Gracias por tu paciencia.";
@@ -235,6 +240,7 @@ const ConversationState = Annotation.Root({
   lastHandledMessage: Annotation<string | null>,
   lastHandledAt: Annotation<number | null>,
   lastResponseText: Annotation<string>,
+  consecutiveErrorCount: Annotation<number>,
   draftReply: Annotation<string>,
   responseText: Annotation<string>,
   threadId: Annotation<string>,
@@ -410,25 +416,29 @@ export function createConversationAssistant(options: {
 
       // Note: Checkpoint is now saved automatically by LangGraph checkpointer
       // We only need to update the order draft if needed (separate table in Convex)
-      if (
-        result.orderDraft &&
-        (result.orderDraft.items.length > 0 || result.cartAction === "clear")
-      ) {
+      if (result.orderDraft) {
         const orderDraft = result.orderDraft;
-        await executeNode(undefined, "upsert_order", () =>
-          options.repository.upsertOrderForSession({
-            telefono: orderDraft.telefono,
-            items: orderDraft.items,
-            direccion: orderDraft.direccion,
-            tipoEntrega: orderDraft.tipoEntrega,
-            metodoPago: orderDraft.metodoPago,
-            nombreCliente: orderDraft.nombreCliente,
-            total: orderDraft.total,
-            estado: orderDraft.estado,
-            montoAbono: orderDraft.montoAbono,
-            sessionId: session.id
-          })
-        );
+
+        if (orderDraft.estado === "completo") {
+          await executeNode(undefined, "upsert_order", () =>
+            options.repository.upsertOrderForSession({
+              telefono: orderDraft.telefono,
+              items: orderDraft.items,
+              direccion: orderDraft.direccion,
+              tipoEntrega: orderDraft.tipoEntrega,
+              metodoPago: orderDraft.metodoPago,
+              nombreCliente: orderDraft.nombreCliente,
+              total: orderDraft.total,
+              estado: orderDraft.estado,
+              montoAbono: orderDraft.montoAbono,
+              sessionId: session.id
+            })
+          );
+        } else if (options.repository.deleteOrderForSession) {
+          await executeNode(undefined, "delete_order", () =>
+            options.repository.deleteOrderForSession!(session.id)
+          );
+        }
       }
 
       setTraceOutput(traceContext, {
@@ -566,8 +576,8 @@ async function complaintHandlerNode(
   } catch (error) {
     logger.error(
       "Failed to persist handed_off status, continuing with human handoff response",
-      error instanceof Error ? error : new Error(String(error)),
       undefined,
+      error instanceof Error ? error : new Error(String(error)),
       { sessionId: session.id, chatId: state.chatId }
     );
   }
@@ -595,6 +605,7 @@ async function loadSessionNode(
 
   return {
     catalog,
+    consecutiveErrorCount: persistedState.consecutiveErrorCount ?? 0,
     lastHandledAt: persistedState.lastHandledAt,
     lastHandledMessage: persistedState.lastHandledMessage,
     lastResponseText: persistedState.lastResponseText ?? "",
@@ -610,6 +621,7 @@ async function analyzeMessageNode(
   state: ConversationGraphState
 ) {
   const normalizedText = normalizeText(state.messageText);
+  const paymentIntent = detectPaymentIntent(state.messageText);
 
   if (isDuplicateMessage(state, normalizedText)) {
     return {
@@ -685,13 +697,20 @@ async function analyzeMessageNode(
     };
   }
 
-  const paymentIntent = shouldUpdateOrder ? null : detectPaymentIntent(state.messageText);
+  const shouldPrioritizePayment = shouldRouteToPaymentHandler({
+    extractedOrderLines,
+    normalizedText,
+    orderDraft: state.orderDraft,
+    paymentIntent
+  });
 
   return {
     duplicateResponseText: "",
     extractedOrderLines,
     isDuplicate: false,
-    intent: shouldUpdateOrder
+    intent: shouldPrioritizePayment
+      ? ("payment" as const)
+      : shouldUpdateOrder
       ? ("order" as const)
       : paymentIntent
         ? ("payment" as const)
@@ -727,6 +746,25 @@ function buildRequestedActions(
 function faqHandlerNode(state: ConversationGraphState) {
   const catalog = requireCatalog(state.catalog);
   const normalizedText = normalizeText(state.messageText);
+  const faqMatch = findFaqMatch(catalog.faq, normalizedText);
+  const hasActiveOrder = Boolean(state.orderDraft?.items.length);
+  const topicSwitchPrompt = hasActiveOrder ? buildTopicSwitchPrompt(state.orderDraft) : null;
+
+  if (faqMatch && (state.wantsMenu || isMenuRequest(normalizedText))) {
+    const availableMenu = catalog.menu.filter((item) => item.disponible);
+    const menuSummary = availableMenu
+      .map((item) => `${item.item} ($${item.precio})`)
+      .join(", ");
+    const combinedReply = menuSummary
+      ? `${faqMatch.respuesta} Menu disponible: ${menuSummary}.`
+      : faqMatch.respuesta;
+
+    return {
+      draftReply: topicSwitchPrompt
+        ? `${topicSwitchPrompt} ${combinedReply}`.trim()
+        : combinedReply
+    };
+  }
 
   if (state.wantsMenu || isMenuRequest(normalizedText)) {
     const availableMenu = catalog.menu.filter((item) => item.disponible);
@@ -743,16 +781,19 @@ function faqHandlerNode(state: ConversationGraphState) {
       .join(", ");
 
     return {
-      draftReply: `Hoy tenemos: ${menuSummary}. Si queres, puedo ayudarte a armar tu pedido.`
+      draftReply: topicSwitchPrompt
+        ? `${topicSwitchPrompt} Hoy tenemos: ${menuSummary}. Si queres, puedo ayudarte a armar tu pedido.`
+        : `Hoy tenemos: ${menuSummary}. Si queres, puedo ayudarte a armar tu pedido.`
     };
   }
 
-  const faqMatch = findFaqMatch(catalog.faq, normalizedText);
-
   return {
     draftReply:
-      faqMatch?.respuesta ??
-      "No encontre ese dato en la base actual. Si queres, puedo mostrarte el menu o tomar tu pedido."
+      faqMatch
+        ? topicSwitchPrompt
+          ? `${topicSwitchPrompt} ${faqMatch.respuesta}`.trim()
+          : faqMatch.respuesta
+        : "No encontre ese dato en la base actual. Si queres, puedo mostrarte el menu o tomar tu pedido."
   };
 }
 
@@ -811,12 +852,13 @@ async function orderHandlerNode(
 
   if (cancellation.isCancellation || cartAction === "clear") {
     if (orderDraft.items.length === 0) {
-      return {
+      return maybeEscalateForRepeatedErrors(repository, state, {
         cartAction: "clear" as const,
         draftReply: "No tenes un pedido activo para cancelar. ¿Queres empezar uno nuevo?",
+        errorDetected: true,
         orderDraft,
         previousCart
-      };
+      });
     }
 
     orderDraft.items = [];
@@ -830,6 +872,7 @@ async function orderHandlerNode(
 
     return {
       cartAction: "clear" as const,
+      consecutiveErrorCount: 0,
       draftReply: "Tu pedido fue cancelado. ¿Queres comenzar de nuevo?",
       orderDraft,
       previousCart
@@ -837,17 +880,24 @@ async function orderHandlerNode(
   }
 
   if (state.validatedOrderLines.length > 0) {
+    const actionScopedOrderLines = scopeValidatedOrderLinesForCartAction({
+      cartAction,
+      catalog,
+      normalizedText,
+      validatedOrderLines: state.validatedOrderLines
+    });
     const validation = validateCartActionForState(cartAction, orderDraft.items);
     if (!validation.valid && cartAction !== "add" && cartAction !== "replace") {
-      return {
+      return maybeEscalateForRepeatedErrors(repository, state, {
         cartAction,
         draftReply: validation.reason ?? "No pude aplicar esa accion sobre el carrito.",
+        errorDetected: true,
         orderDraft,
         previousCart
-      };
+      });
     }
 
-    const incomingItems: Array<ConversationOrderItem> = state.validatedOrderLines.map((line) => ({
+    const incomingItems: Array<ConversationOrderItem> = actionScopedOrderLines.map((line) => ({
       cantidad: line.quantity,
       precioUnitario: line.precioUnitario,
       producto: line.matchedProduct
@@ -861,39 +911,37 @@ async function orderHandlerNode(
   }
 
   if (!hasIncomingLines && orderDraft.items.length === 0) {
-    return {
+    return maybeEscalateForRepeatedErrors(repository, state, {
       cartAction,
       draftReply: "Decime que producto queres pedir y lo preparo.",
+      errorDetected: true,
       orderDraft,
       previousCart
-    };
+    });
   }
 
   if (orderDraft.items.length === 0 && state.invalidOrderLines.length > 0) {
     orderDraft.estado = "error_producto";
+    const draftReply = buildOrderReply({
+      cartAction,
+      invalidOrderLines: state.invalidOrderLines,
+      orderDraft,
+      suggestedProducts,
+      validatedOrderLines: []
+    });
 
-    return {
-      draftReply: buildOrderReply({
-        cartAction,
-        invalidOrderLines: state.invalidOrderLines,
-        orderDraft,
-        suggestedProducts,
-        validatedOrderLines: []
-      }),
+    return maybeEscalateForRepeatedErrors(repository, state, {
+      draftReply,
+      errorDetected: true,
       orderDraft,
       previousCart
-    };
+    });
   }
 
   if (orderDraft.items.length > 0) {
     updateOrderDraftWithMessage(orderDraft, normalizedText);
-    recalculateOrderTool(orderDraft);
+    recalculateOrderTool(orderDraft, catalog);
     orderDraft.estado = determineOrderStatus(orderDraft);
-
-    await repository.upsertOrderForSession({
-      ...orderDraft,
-      sessionId: session.id
-    });
 
     if (
       !hasIncomingLines &&
@@ -902,23 +950,36 @@ async function orderHandlerNode(
     ) {
       return {
         draftReply: buildOrderTotalReply(orderDraft),
+        consecutiveErrorCount: 0,
         orderDraft,
         previousCart
       };
     }
   }
 
-  return {
-    draftReply: buildOrderReply({
+  const draftReply = buildOrderReply({
+    cartAction,
+    invalidOrderLines: state.invalidOrderLines,
+    orderDraft,
+    suggestedProducts,
+    validatedOrderLines: scopeValidatedOrderLinesForCartAction({
       cartAction,
-      invalidOrderLines: state.invalidOrderLines,
-      orderDraft,
-      suggestedProducts,
+      catalog,
+      normalizedText,
       validatedOrderLines: state.validatedOrderLines
+    })
+  });
+
+  return maybeEscalateForRepeatedErrors(repository, state, {
+    draftReply,
+    errorDetected: shouldCountConversationError({
+      draftReply,
+      invalidOrderLines: state.invalidOrderLines,
+      orderDraft
     }),
     orderDraft,
     previousCart
-  };
+  });
 }
 
 async function paymentHandlerNode(
@@ -943,6 +1004,7 @@ async function paymentHandlerNode(
 
     if (faqMatch) {
       return {
+        consecutiveErrorCount: 0,
         draftReply: faqMatch.respuesta
       };
     }
@@ -954,9 +1016,10 @@ async function paymentHandlerNode(
 
   if (!paymentIntent) {
     return {
+      consecutiveErrorCount: 0,
       draftReply: paymentConfig
         ? generatePaymentMethodsResponse(paymentConfig)
-        : "Aceptamos efectivo y transferencia. Si queres, te paso los datos."
+        : "Aceptamos solo efectivo. Si queres, te calculo el vuelto."
     };
   }
 
@@ -968,61 +1031,68 @@ async function paymentHandlerNode(
       orderDraft.montoAbono === null
     ) {
       return {
+        consecutiveErrorCount: 0,
         draftReply: `El total de tu pedido es $${orderDraft.total}. ¿Con cuanto vas a pagar?`
       };
     }
 
     return {
+      consecutiveErrorCount: 0,
       draftReply: paymentConfig
         ? generatePaymentMethodsResponse(paymentConfig)
-        : "Aceptamos efectivo y transferencia. Si queres, te paso los datos."
+        : "Aceptamos solo efectivo. Si queres, te calculo el vuelto."
     };
   }
 
   if (!orderDraft || orderDraft.items.length === 0) {
-    return {
-      draftReply: "Necesito un pedido activo para continuar con el pago. ¿Querés hacer un pedido?"
-    };
+    return maybeEscalateForRepeatedErrors(repository, state, {
+      draftReply: "Necesito un pedido activo para continuar con el pago. ¿Querés hacer un pedido?",
+      errorDetected: true
+    });
   }
 
   if (paymentIntent === "payment_amount") {
     const paymentAmount = extractPaymentAmountFromPaymentHandler(state.messageText);
 
     if (paymentAmount === null) {
-      return {
-        draftReply: "No pude identificar el monto. Decime con cuanto vas a pagar y lo calculo."
-      };
+      return maybeEscalateForRepeatedErrors(repository, state, {
+        draftReply: "No pude identificar el monto. Decime con cuanto vas a pagar y lo calculo.",
+        errorDetected: true,
+        orderDraft
+      });
     }
 
     if (paymentAmount < orderDraft.total) {
-      return {
-        draftReply: generateInsufficientAmountResponse(orderDraft.total, paymentAmount)
-      };
+      return maybeEscalateForRepeatedErrors(repository, state, {
+        draftReply: generateInsufficientAmountResponse(orderDraft.total, paymentAmount),
+        errorDetected: true,
+        orderDraft
+      });
+    }
+
+    if (!orderDraft.metodoPago) {
+      orderDraft.metodoPago = "efectivo";
     }
 
     orderDraft.montoAbono = paymentAmount;
     orderDraft.estado = determineOrderStatus(orderDraft);
-    const session = requireSession(state.session);
-
-    await repository.upsertOrderForSession({
-      ...orderDraft,
-      sessionId: session.id
-    });
-
     return {
-      draftReply: generateChangeResponse(orderDraft.total, paymentAmount, paymentConfig ?? undefined),
+      consecutiveErrorCount: 0,
+      draftReply: buildPaymentAmountReply(orderDraft, paymentAmount),
       orderDraft
     };
   }
 
   if (orderDraft.estado !== "completo") {
     return {
+      consecutiveErrorCount: 0,
       draftReply: buildOrderFollowUp(orderDraft),
       orderDraft
     };
   }
 
   return {
+    consecutiveErrorCount: 0,
     draftReply: generateOrderConfirmationPayment(orderDraft, paymentConfig ?? undefined),
     orderDraft
   };
@@ -1039,12 +1109,15 @@ async function formatResponseNode(
     state.requestedActions.includes("answer_faq") &&
     !state.wantsMenu;
   const normalizedMessage = normalizeText(state.messageText);
-  const buildResponseUpdate = (responseText: string) => ({
-    lastHandledAt: Date.now(),
-    lastHandledMessage: normalizedMessage,
-    lastResponseText: responseText,
-    responseText
-  });
+  const buildResponseUpdate = (responseText: string) => {
+    const sanitizedResponse = sanitizeAssistantResponse(responseText);
+    return {
+      lastHandledAt: Date.now(),
+      lastHandledMessage: normalizedMessage,
+      lastResponseText: sanitizedResponse,
+      responseText: sanitizedResponse
+    };
+  };
 
   if (state.suppressReply) {
     return buildResponseUpdate("");
@@ -1089,7 +1162,11 @@ function buildOrderReply(input: {
     const removedItems = input.validatedOrderLines
       .map((line) => `${line.quantity} ${line.matchedProduct}`)
       .join(", ");
-    segments.push(`Quitado: ${removedItems}.`);
+    const totalSummary =
+      input.orderDraft.items.length > 0
+        ? ` Total parcial: $${input.orderDraft.total}.`
+        : "";
+    segments.push(`Quitado: ${removedItems}.${totalSummary}`);
   } else if (
     input.cartAction === "replace" &&
     input.validatedOrderLines.length > 0 &&
@@ -1178,11 +1255,49 @@ function buildOrderReply(input: {
   return segments.join(" ").trim();
 }
 
+function sanitizeAssistantResponse(responseText: string): string {
+  const trimmed = responseText.trim();
+
+  if (!trimmed) {
+    return trimmed;
+  }
+
+  return trimmed
+    .replace(/^¡?\s*che[,!.\s]*/iu, "")
+    .trim();
+}
+
+function buildPaymentAmountReply(
+  orderDraft: ConversationOrderDraft,
+  paymentAmount: number
+): string {
+  if (orderDraft.estado === "completo") {
+    return buildOrderFollowUp(orderDraft);
+  }
+
+  const change = paymentAmount - orderDraft.total;
+  const paymentSummary =
+    change === 0
+      ? `Perfecto. El total es $${orderDraft.total} y abonas con el monto exacto.`
+      : `Perfecto. El total es $${orderDraft.total}. Pagando $${paymentAmount}, tu vuelto sera $${change}.`;
+
+  return `${paymentSummary} ${buildOrderFollowUp(orderDraft)}`;
+}
+
+function buildTopicSwitchPrompt(orderDraft: ConversationOrderDraft | null): string {
+  if (!orderDraft || orderDraft.items.length === 0) {
+    return "";
+  }
+
+  return "Tengo tu pedido en curso. Si prefieres cambiar de tema, luego retomamos el pedido.";
+}
+
 function parsePersistedConversationState(
   checkpoint: ConversationCheckpoint | null
 ): PersistedConversationState {
   if (!checkpoint) {
     return {
+      consecutiveErrorCount: 0,
       intent: null,
       lastHandledAt: null,
       lastHandledMessage: null,
@@ -1196,6 +1311,10 @@ function parsePersistedConversationState(
     const parsed = JSON.parse(checkpoint.checkpoint) as Partial<PersistedConversationState>;
 
     return {
+      consecutiveErrorCount:
+        typeof parsed.consecutiveErrorCount === "number"
+          ? parsed.consecutiveErrorCount
+          : 0,
       intent: isConversationIntent(parsed.intent) ? parsed.intent : null,
       lastHandledAt:
         typeof parsed.lastHandledAt === "number" ? parsed.lastHandledAt : null,
@@ -1219,6 +1338,7 @@ function parsePersistedConversationState(
       checkpointLength: checkpoint.checkpoint.length
     });
     return {
+      consecutiveErrorCount: 0,
       intent: null,
       lastHandledAt: null,
       lastHandledMessage: null,
@@ -1392,6 +1512,10 @@ function isOrderFollowUpMessage(
     return false;
   }
 
+  if (detectCartAction(normalizedText) !== "add") {
+    return true;
+  }
+
   if (
     includesAny(normalizedText, [
       "delivery",
@@ -1451,6 +1575,10 @@ function isDetailOnlyOrderMessage(
   orderDraft: ConversationOrderDraft | null
 ): boolean {
   if (!orderDraft) {
+    return false;
+  }
+
+  if (detectCartAction(normalizedText) !== "add") {
     return false;
   }
 
@@ -1567,8 +1695,108 @@ function buildFaqTerms(entry: CatalogFaqRecord): Array<string> {
 function normalizeFaqMatchText(value: string): string {
   return normalizeText(value)
     .replace(/[^a-z0-9\s]/gu, " ")
+    .replace(/\bpagar\b/gu, "pago")
+    .replace(/\bpagos\b/gu, "pago")
     .replace(/\s+/gu, " ")
+    .split(" ")
+    .filter(Boolean)
+    .map((token) => singularizeWord(token))
+    .join(" ")
     .trim();
+}
+
+function extractDeliveryFeeFromCatalog(catalog: CatalogSnapshot | null): number {
+  if (!catalog) {
+    return DELIVERY_FEE_FALLBACK;
+  }
+
+  const deliveryEntry = catalog.faq.find((entry) =>
+    includesAny(normalizeText(`${entry.tema} ${entry.pregunta}`), ["delivery", "envio", "envíos"])
+  );
+
+  if (!deliveryEntry) {
+    return DELIVERY_FEE_FALLBACK;
+  }
+
+  const responseText = deliveryEntry.respuesta;
+  const amountMatch = responseText.match(/\$\s*([\d.]+)/u);
+
+  if (!amountMatch?.[1]) {
+    return DELIVERY_FEE_FALLBACK;
+  }
+
+  const numericAmount = Number.parseInt(amountMatch[1].replace(/\./gu, ""), 10);
+
+  return Number.isFinite(numericAmount) ? numericAmount : DELIVERY_FEE_FALLBACK;
+}
+
+function shouldRouteToPaymentHandler(input: {
+  normalizedText: string;
+  paymentIntent: ReturnType<typeof detectPaymentIntent>;
+  orderDraft: ConversationOrderDraft | null;
+  extractedOrderLines: Array<ExtractedOrderLine>;
+}): boolean {
+  const { extractedOrderLines, normalizedText, orderDraft, paymentIntent } = input;
+
+  if (!orderDraft || orderDraft.items.length === 0 || !paymentIntent) {
+    return false;
+  }
+
+  if (
+    paymentIntent === "payment_confirmation" ||
+    isPaymentMethodsQuestion(normalizedText)
+  ) {
+    return true;
+  }
+
+  if (extractPaymentAmountFromPaymentHandler(normalizedText) !== null) {
+    return true;
+  }
+
+  if (isOrderTotalInquiry(normalizedText)) {
+    return false;
+  }
+
+  if (extractedOrderLines.length > 0) {
+    return false;
+  }
+
+  if (isSpecificPaymentMethodSelection(normalizedText)) {
+    return false;
+  }
+
+  return paymentIntent === "payment_question";
+}
+
+function isPaymentMethodsQuestion(normalizedText: string): boolean {
+  return includesAny(normalizedText, [
+    "como puedo pagar",
+    "como pago",
+    "formas de pago",
+    "metodos de pago",
+    "metodo de pago",
+    "medios de pago",
+    "que aceptan",
+    "qué aceptan",
+    "aceptan mercado pago",
+    "aceptan transferencia",
+    "aceptan tarjeta",
+    "aceptan efectivo"
+  ]);
+}
+
+function isSpecificPaymentMethodSelection(normalizedText: string): boolean {
+  return (
+    includesAny(normalizedText, [
+      "efectivo",
+      "transferencia",
+      "mercado pago",
+      "mercadopago",
+      "tarjeta",
+      "alias"
+    ]) &&
+    !isPaymentMethodsQuestion(normalizedText)
+  );
 }
 
 function findMatchingPriceEntry(
@@ -1638,6 +1866,45 @@ function buildPriceLookupKeys(entry: CatalogPriceRecord): Array<string> {
   }
 
   return Array.from(keys);
+}
+
+function scopeValidatedOrderLinesForCartAction(input: {
+  cartAction: CartAction;
+  catalog: CatalogSnapshot;
+  normalizedText: string;
+  validatedOrderLines: Array<ResolvedOrderLine>;
+}): Array<ResolvedOrderLine> {
+  const { cartAction, catalog, normalizedText, validatedOrderLines } = input;
+
+  if (
+    (cartAction !== "remove" && cartAction !== "replace") ||
+    validatedOrderLines.length <= 1
+  ) {
+    return validatedOrderLines;
+  }
+
+  const scopedLines = validatedOrderLines.filter((line) => {
+    const priceEntry = findMatchingPriceEntry(
+      catalog.prices,
+      normalizeProductKey(line.matchedProduct)
+    );
+    const candidateKeys = priceEntry
+      ? buildPriceLookupKeys(priceEntry)
+      : [normalizeProductKey(line.requestedProduct), normalizeProductKey(line.matchedProduct)];
+
+    return candidateKeys.some((key) => containsWholePhrase(normalizedText, key));
+  });
+
+  const sourceLines = scopedLines.length > 0 ? scopedLines : validatedOrderLines;
+  const dedupedLines = new Map<string, ResolvedOrderLine>();
+
+  for (const line of sourceLines) {
+    if (!dedupedLines.has(line.matchedProduct)) {
+      dedupedLines.set(line.matchedProduct, line);
+    }
+  }
+
+  return Array.from(dedupedLines.values());
 }
 
 function buildDerivedProductAliases(productName: string): Array<string> {
@@ -1729,8 +1996,17 @@ function mergeOrderItemsTool(
   }
 }
 
-function recalculateOrderTool(orderDraft: ConversationOrderDraft) {
-  orderDraft.total = calculateOrderTotals(orderDraft.items).total;
+function recalculateOrderTool(
+  orderDraft: ConversationOrderDraft,
+  catalog?: CatalogSnapshot | null
+) {
+  const itemsTotal = calculateOrderTotals(orderDraft.items).total;
+  const deliveryFee =
+    orderDraft.tipoEntrega === "delivery"
+      ? extractDeliveryFeeFromCatalog(catalog ?? null)
+      : 0;
+
+  orderDraft.total = itemsTotal + deliveryFee;
 }
 
 function updateOrderDraftWithMessage(
@@ -1767,18 +2043,7 @@ function updateOrderDraftWithMessage(
       "alias"
     ])
   ) {
-    if (includesAny(normalizedText, ["mercado pago", "mercadopago"])) {
-      orderDraft.metodoPago = "mercado pago";
-    } else if (normalizedText.includes("tarjeta")) {
-      orderDraft.metodoPago = "tarjeta";
-    } else if (
-      normalizedText.includes("transferencia") ||
-      normalizedText.includes("alias")
-    ) {
-      orderDraft.metodoPago = "transferencia";
-    } else {
-      orderDraft.metodoPago = "efectivo";
-    }
+    orderDraft.metodoPago = "efectivo";
   }
 
   const explicitName = normalizedText.match(/(?:me llamo|soy)\s+([a-z\s]+)/u);
@@ -1797,6 +2062,89 @@ function updateOrderDraftWithMessage(
       orderDraft.montoAbono = paymentAmount;
     }
   }
+}
+
+async function maybeEscalateForRepeatedErrors(
+  repository: ConversationRepository,
+  state: ConversationGraphState,
+  payload: {
+    draftReply: string;
+    errorDetected: boolean;
+    orderDraft?: ConversationOrderDraft | null;
+    previousCart?: Array<ConversationOrderItem> | undefined;
+    cartAction?: "add" | "remove" | "replace" | "clear" | undefined;
+  }
+) {
+  const consecutiveErrorCount = nextConsecutiveErrorCount({
+    chatId: state.chatId,
+    currentCount: state.consecutiveErrorCount,
+    hasError: payload.errorDetected
+  });
+
+  if (consecutiveErrorCount < ERROR_HANDOFF_THRESHOLD) {
+    return {
+      cartAction: payload.cartAction,
+      consecutiveErrorCount,
+      draftReply: payload.draftReply,
+      orderDraft: payload.orderDraft,
+      previousCart: payload.previousCart
+    };
+  }
+
+  await repository.updateSessionStatus(state.chatId, "handed_off");
+  consecutiveErrorCounts.delete(state.chatId);
+
+  return {
+    cartAction: payload.cartAction,
+    consecutiveErrorCount: 0,
+    draftReply: HANDOFF_RESPONSE,
+    isHandedOff: true,
+    orderDraft: payload.orderDraft,
+    previousCart: payload.previousCart,
+    suppressReply: false
+  };
+}
+
+function nextConsecutiveErrorCount(input: {
+  chatId?: string;
+  currentCount: number | null | undefined;
+  hasError: boolean;
+}): number {
+  if (!input.hasError) {
+    if (input.chatId) {
+      consecutiveErrorCounts.delete(input.chatId);
+    }
+    return 0;
+  }
+
+  const previousCount = input.chatId
+    ? consecutiveErrorCounts.get(input.chatId) ?? 0
+    : input.currentCount ?? 0;
+  const nextCount = Math.max(previousCount, input.currentCount ?? 0) + 1;
+
+  if (input.chatId) {
+    consecutiveErrorCounts.set(input.chatId, nextCount);
+  }
+
+  return nextCount;
+}
+
+function shouldCountConversationError(input: {
+  draftReply: string;
+  invalidOrderLines?: Array<InvalidOrderLine>;
+  orderDraft?: ConversationOrderDraft | null;
+}): boolean {
+  if ((input.invalidOrderLines?.length ?? 0) > 0) {
+    return true;
+  }
+
+  const normalizedReply = normalizeText(input.draftReply);
+
+  if (includesAny(normalizedReply, ["no encontre", "no pude", "insuficiente", "necesito un pedido activo"])) {
+    return true;
+  }
+
+  return input.orderDraft?.estado === "error_producto";
 }
 
 function looksLikeNameOnlyMessage(normalizedText: string): boolean {
@@ -1851,6 +2199,10 @@ function looksLikeNameOnlyMessage(normalizedText: string): boolean {
     return false;
   }
 
+  if (detectCartAction(normalizedText) !== "add") {
+    return false;
+  }
+
   return true;
 }
 
@@ -1888,7 +2240,7 @@ function buildOrderFollowUp(orderDraft: ConversationOrderDraft): string {
   }
 
   if (!orderDraft.metodoPago) {
-    return "¿Como queres pagar? (efectivo/tarjeta/transferencia/mercado pago)";
+    return "¿Como queres pagar? Por ahora trabajamos solo con efectivo.";
   }
 
   if (!orderDraft.nombreCliente) {

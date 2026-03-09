@@ -3,7 +3,7 @@
  *
  * Este módulo implementa el manejo de pagos del sistema,
  * incluyendo detección de intenciones de pago, cálculo de vuelto,
- * y gestión de métodos de pago (efectivo, transferencia).
+ * y gestión de métodos de pago del pre-MVP (solo efectivo).
  */
 
 import type { ConversationOrderDraft } from "./conversation-assistant.js";
@@ -33,13 +33,33 @@ export interface PaymentConfig {
 }
 
 const PAYMENT_AMOUNT_REGEX = /^(?:\$?\s*)?(\d+(?:\.\d+)?)(?:\s*(?:pesos|ars|\$))?$/u;
-const PAYMENT_PREFIX_REGEX = /(?:con|pago|tengo|son|abono|vengo)\s+(\d+(?:\.\d+)?)/u;
+const PAYMENT_PREFIX_REGEX =
+  /(?:te\s+)?(?:con|pago|tengo|son|abono|vengo)(?:\s+con)?\s+\$?\s*(\d+(?:\.\d+)?)/u;
+
+function normalizePaymentIntentText(messageText: string): string {
+  return messageText
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim();
+}
+
+function containsWholePhrase(input: string, phrase: string): boolean {
+  if (!input || !phrase) {
+    return false;
+  }
+
+  const escapedPhrase = phrase.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+  return new RegExp(`(?:^|\\s)${escapedPhrase}(?:$|\\s)`, "u").test(input);
+}
 
 /**
  * Detecta si el mensaje del usuario es sobre pagos
  */
 export function detectPaymentIntent(messageText: string): PaymentIntent {
-  const normalizedText = messageText.toLowerCase().trim();
+  const normalizedText = normalizePaymentIntentText(messageText);
 
   // Detección de monto de pago (número simple o prefijo "con/pago/tengo")
   if (PAYMENT_AMOUNT_REGEX.test(normalizedText) || PAYMENT_PREFIX_REGEX.test(normalizedText)) {
@@ -59,7 +79,7 @@ export function detectPaymentIntent(messageText: string): PaymentIntent {
     "adelante"
   ];
 
-  if (confirmationKeywords.some(keyword => normalizedText.includes(keyword))) {
+  if (confirmationKeywords.some((keyword) => containsWholePhrase(normalizedText, keyword))) {
     return "payment_confirmation";
   }
 
@@ -70,16 +90,16 @@ export function detectPaymentIntent(messageText: string): PaymentIntent {
     "con cuánto",
     "qué billete",
     "con qué",
-    "tengo",
-    "pago con"
+    "tengo"
   ];
 
-  if (questionKeywords.some(keyword => normalizedText.includes(keyword))) {
+  if (questionKeywords.some((keyword) => containsWholePhrase(normalizedText, keyword))) {
     return "payment_question";
   }
 
   // Detección de consultas sobre métodos de pago
   const paymentMethodsKeywords = [
+    "como puedo pagar",
     "como pago",
     "formas de pago",
     "metodos de pago",
@@ -97,7 +117,7 @@ export function detectPaymentIntent(messageText: string): PaymentIntent {
     "tarjeta"
   ];
 
-  if (paymentMethodsKeywords.some(keyword => normalizedText.includes(keyword))) {
+  if (paymentMethodsKeywords.some((keyword) => containsWholePhrase(normalizedText, keyword))) {
     return "payment_methods";
   }
 
@@ -121,31 +141,10 @@ export function generatePaymentMethodsResponse(config: {
   // Encabezado de métodos de pago
   segments.push("Aceptamos los siguientes métodos de pago:\n");
 
-  // Efectivo
-  if (config.metodos.includes("efectivo")) {
-    segments.push("💵 **Efectivo**\n");
-    segments.push(`   • Contra entrega o al retirar\n`);
-    if (config.efectivoMinimo > 0) {
-      segments.push(`   • Mínimo: $${config.efectivoMinimo}\n`);
-    }
-  }
-
-  // Transferencia
-  if (config.metodos.includes("transferencia")) {
-    segments.push("📱 **Transferencia bancaria**\n");
-    segments.push(`   • Banco: ${config.transferenciaBanco}\n`);
-    segments.push(`   • Alias: ${config.transferenciaAlias}\n`);
-    if (config.transferenciaCUIT) {
-      segments.push(`   • CUIT/CUIL: ${config.transferenciaCUIT}\n`);
-    }
-    if (config.metodos.includes("mercado pago") || config.metodos.includes("mercadopago")) {
-      segments.push(`   • También puedes usar MercadoPago con el alias\n`);
-    }
-  }
-
-  // Información de entrega de pago
-  if (config.entregaPago === "adelantado") {
-    segments.push("\n⚠️ Para transferencia, el pago debe ser adelantado.\n");
+  segments.push("💵 **Efectivo**\n");
+  segments.push("   • Contra entrega o al retirar\n");
+  if (config.efectivoMinimo > 0) {
+    segments.push(`   • Mínimo: $${config.efectivoMinimo}\n`);
   }
 
   return segments.join("");
@@ -177,10 +176,6 @@ export function generateChangeResponse(
     segments.push(`El total de tu pedido es $${orderTotal}.\n`);
     segments.push(`Por favor, ingresa un monto mayor o igual al total.\n`);
     return segments.join("");
-  }
-
-  if (paymentConfig?.entregaPago === "adelantado" && paymentConfig.metodos.includes("transferencia")) {
-    segments.push("\n📱 Recuerda que la transferencia debe ser enviada antes de la entrega del pedido.");
   }
 
   segments.push("\n¿Confirmas el pedido?");
@@ -239,9 +234,6 @@ export function generateOrderConfirmationResponse(
         segments.push(`   Monto exacto: $${orderDraft.montoAbono}\n`);
       }
     }
-  } else if (orderDraft.metodoPago === "transferencia") {
-    segments.push(`📱 Pagando por transferencia\n`);
-    segments.push("   Debes enviar la transferencia antes de la entrega del pedido.\n");
   }
 
   segments.push("\n✅ ¿Confirmas el pedido?\n");

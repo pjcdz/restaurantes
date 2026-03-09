@@ -44,8 +44,15 @@ export type HandedOffSession = {
   updatedAt: number;
 };
 
+export type ConversationHistoryEntry = {
+  message: string;
+  reply: string;
+  timestamp: number;
+};
+
 export type HandoffAdminRepository = {
   getHandedOffSessions(): Promise<Array<HandedOffSession>>;
+  getConversationHistory(chatId: string): Promise<Array<ConversationHistoryEntry>>;
   reactivateSession(chatId: string): Promise<void>;
 };
 
@@ -183,6 +190,13 @@ export class ConvexAdminRepository implements CatalogAdminRepository {
     return Array.from(mergedByChatId.values()).sort(
       (left, right) => right.updatedAt - left.updatedAt
     );
+  }
+
+  async getConversationHistory(chatId: string): Promise<Array<ConversationHistoryEntry>> {
+    return (await this.client.query(
+      convexApi.conversations.getConversationHistoryByChatId,
+      { chatId }
+    )) as Array<ConversationHistoryEntry>;
   }
 
   async reactivateSession(chatId: string): Promise<void> {

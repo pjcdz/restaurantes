@@ -25,7 +25,7 @@ const mockCatalog: CatalogSnapshot = {
   faq: [
     { tema: "horario", pregunta: "¿Cuál es el horario?", respuesta: "Lunes a Viernes 11:00-22:00" },
     { tema: "ubicacion", pregunta: "¿Dónde están ubicados?", respuesta: "Av. Corrientes 1234, CABA" },
-    { tema: "pago", pregunta: "¿Qué métodos de pago aceptan?", respuesta: "Aceptamos efectivo y Mercado Pago" },
+    { tema: "pago", pregunta: "¿Qué métodos de pago aceptan?", respuesta: "Aceptamos solo efectivo" },
     { tema: "delivery", pregunta: "¿Hacen delivery?", respuesta: "Hacemos delivery en un radio de 3km" }
   ],
   prices: [
@@ -162,6 +162,11 @@ describe("Test Battery", () => {
         const faqTests = tests.filter((t) => t.category === "faq");
         expect(faqTests.length).toBeGreaterThan(0);
       });
+
+      it("should include a combined FAQ and menu scenario", () => {
+        const faqTests = tests.filter((t) => t.category === "faq");
+        expect(faqTests.some((t) => t.id === "F6")).toBe(true);
+      });
     });
 
     describe("Menu tests", () => {
@@ -191,6 +196,12 @@ describe("Test Battery", () => {
       it("should have multi-item order scenarios", () => {
         const multiOrderTests = tests.filter((t) => t.category === "multi_order");
         expect(multiOrderTests.length).toBeGreaterThan(0);
+      });
+
+      it("should include remove and replace cart scenarios", () => {
+        const multiOrderTests = tests.filter((t) => t.category === "multi_order");
+        expect(multiOrderTests.some((t) => t.id === "MO4")).toBe(true);
+        expect(multiOrderTests.some((t) => t.id === "MO5")).toBe(true);
       });
     });
 
@@ -223,8 +234,14 @@ describe("Test Battery", () => {
         const hasCancelTest = edgeTests.some((t) =>
           t.messages.some((m) => m.toLowerCase().includes("cancel"))
         );
-        
+
         expect(hasCancelTest).toBe(true);
+      });
+
+      it("should include topic switch and active-order cancellation scenarios", () => {
+        const edgeTests = tests.filter((t) => t.category === "edge_case");
+        expect(edgeTests.some((t) => t.id === "E6")).toBe(true);
+        expect(edgeTests.some((t) => t.id === "E7")).toBe(true);
       });
     });
 
@@ -282,8 +299,13 @@ describe("Test Battery", () => {
         const hasSupervisorTest = handoffTests.some((t) =>
           t.messages.some((m) => m.toLowerCase().includes("supervisor"))
         );
-        
+
         expect(hasSupervisorTest).toBe(true);
+      });
+
+      it("should include automatic handoff after repeated errors", () => {
+        const handoffTests = tests.filter((t) => t.category === "handoff");
+        expect(handoffTests.some((t) => t.id === "HANDOFF-05")).toBe(true);
       });
     });
 

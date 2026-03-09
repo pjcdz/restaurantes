@@ -114,7 +114,7 @@ const FAQ_FALLBACKS: Record<string, string> = {
   envio:
     "Realizamos entregas a domicilio. El costo varía según tu ubicación.",
   pago:
-    "Aceptamos pagos en efectivo y por transferencia bancaria al momento de la entrega.",
+    "Por ahora aceptamos solo efectivo al momento de la entrega o al retirar.",
   efectivo:
     "Sí, aceptamos pagos en efectivo al momento de la entrega o recogida.",
   ubicacion:

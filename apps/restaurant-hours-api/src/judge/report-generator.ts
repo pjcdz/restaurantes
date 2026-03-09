@@ -4,8 +4,12 @@ import type { TestReport, TestResult, CategoryStats, TokenUsage } from "./judge-
  * Format token usage for display
  */
 function formatTokens(tokens: TokenUsage): string {
-  if (tokens.total === 0) {
-    return "N/A";
+  if (
+    tokens.total === 0 &&
+    tokens.prompt === 0 &&
+    tokens.completion === 0
+  ) {
+    return "0 (0 prompt + 0 completion)";
   }
   return `${tokens.total.toLocaleString()} (${tokens.prompt.toLocaleString()} prompt + ${tokens.completion.toLocaleString()} completion)`;
 }
@@ -70,6 +74,7 @@ export function generateReport(report: TestReport): void {
   console.log(`Average Score: ${report.avgScore}%`);
   console.log(`Pass Rate: ${report.passRate}% (${report.passedTests}/${report.totalTests} tests scored ≥75%)`);
   console.log(`Total Duration: ${formatDuration(report.totalDurationMs)}`);
+  console.log(`P95 Latency: ${formatDuration(report.p95LatencyMs)}`);
   console.log("");
 
   // Token usage
@@ -100,7 +105,8 @@ export function generateReport(report: TestReport): void {
       `${indicator} ${getCategoryDisplayName(stats.category).padEnd(18)} ` +
       `${stats.passed}/${stats.total} passed (${passRate}%) | ` +
       `avg: ${stats.avgScore}% | ` +
-      `latency: ${formatDuration(stats.avgLatencyMs)}`
+      `latency: ${formatDuration(stats.avgLatencyMs)} | ` +
+      `p95: ${formatDuration(stats.p95LatencyMs)}`
     );
   }
   console.log("");
@@ -175,6 +181,7 @@ export function generateCompactSummary(report: TestReport): string {
     `AI-as-a-Judge Results: ${report.passedTests}/${report.totalTests} passed (${report.passRate}%)`,
     `Average Score: ${report.avgScore}%`,
     `Duration: ${formatDuration(report.totalDurationMs)}`,
+    `P95: ${formatDuration(report.p95LatencyMs)}`,
     `Tokens: ${formatTokens({ prompt: report.totalSutTokens.prompt + report.totalJudgeTokens.prompt, completion: report.totalSutTokens.completion + report.totalJudgeTokens.completion, total: report.totalSutTokens.total + report.totalJudgeTokens.total })}`
   ];
 

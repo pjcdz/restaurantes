@@ -123,7 +123,7 @@ describe("DegradationHandler", () => {
 
     it("matches 'pago' keyword", () => {
       const response = handler.getFallbackResponse("faq", "¿Qué métodos de pago aceptan?");
-      expect(response).toContain("efectivo y por transferencia");
+      expect(response).toContain("solo efectivo");
     });
 
     it("matches 'efectivo' keyword", () => {

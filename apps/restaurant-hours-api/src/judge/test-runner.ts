@@ -239,6 +239,7 @@ async function runTest(
  */
 function calculateCategoryStats(results: Array<TestResult>): Array<CategoryStats> {
   const categories = new Map<TestCategory, CategoryStats>();
+  const latenciesByCategory = new Map<TestCategory, Array<number>>();
 
   for (const result of results) {
     const category = result.testCase.category;
@@ -248,28 +249,42 @@ function calculateCategoryStats(results: Array<TestResult>): Array<CategoryStats
       passed: 0,
       avgScore: 0,
       avgLatencyMs: 0,
+      p95LatencyMs: 0,
       totalTokens: { prompt: 0, completion: 0, total: 0 }
     };
+    const totalLatency = result.sutTiming.latencyMs + result.judgeTiming.latencyMs;
 
     existing.total += 1;
     if (result.passed) {
       existing.passed += 1;
     }
     existing.avgScore += result.judgeEvaluation.overallScore;
-    existing.avgLatencyMs += result.sutTiming.latencyMs + result.judgeTiming.latencyMs;
+    existing.avgLatencyMs += totalLatency;
     existing.totalTokens.prompt += result.sutTokens.prompt + result.judgeTokens.prompt;
     existing.totalTokens.completion += result.sutTokens.completion + result.judgeTokens.completion;
     existing.totalTokens.total += result.sutTokens.total + result.judgeTokens.total;
 
     categories.set(category, existing);
+    latenciesByCategory.set(category, [...(latenciesByCategory.get(category) ?? []), totalLatency]);
   }
 
   // Calculate averages
   return Array.from(categories.values()).map((stats) => ({
     ...stats,
     avgScore: Math.round(stats.avgScore / stats.total),
-    avgLatencyMs: Math.round(stats.avgLatencyMs / stats.total)
+    avgLatencyMs: Math.round(stats.avgLatencyMs / stats.total),
+    p95LatencyMs: calculateP95(latenciesByCategory.get(stats.category) ?? [])
   }));
+}
+
+function calculateP95(values: Array<number>): number {
+  if (values.length === 0) {
+    return 0;
+  }
+
+  const sorted = [...values].sort((left, right) => left - right);
+  const index = Math.max(0, Math.ceil(sorted.length * 0.95) - 1);
+  return sorted[index] ?? 0;
 }
 
 /**
@@ -349,6 +364,9 @@ export async function runTests(baseUrl: string): Promise<TestReport> {
     passRate,
     avgScore,
     totalDurationMs: reportEndTime - reportStartTime,
+    p95LatencyMs: calculateP95(
+      results.map((result) => result.sutTiming.latencyMs + result.judgeTiming.latencyMs)
+    ),
     totalSutTokens,
     totalJudgeTokens,
     categoryStats: calculateCategoryStats(results),
@@ -394,6 +412,7 @@ export async function runTestsWithFilter(
       passRate: 0,
       avgScore: 0,
       totalDurationMs: 0,
+      p95LatencyMs: 0,
       totalSutTokens: { prompt: 0, completion: 0, total: 0 },
       totalJudgeTokens: { prompt: 0, completion: 0, total: 0 },
       categoryStats: [],
@@ -454,6 +473,9 @@ export async function runTestsWithFilter(
     passRate,
     avgScore,
     totalDurationMs: reportEndTime - reportStartTime,
+    p95LatencyMs: calculateP95(
+      results.map((result) => result.sutTiming.latencyMs + result.judgeTiming.latencyMs)
+    ),
     totalSutTokens,
     totalJudgeTokens,
     categoryStats: calculateCategoryStats(results),

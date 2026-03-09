@@ -20,6 +20,7 @@ vi.mock("convex/server", () => ({
     conversations: {
       deleteCatalogItem: "conversations:deleteCatalogItem",
       deleteFaqEntry: "conversations:deleteFaqEntry",
+      getConversationHistoryByChatId: "conversations:getConversationHistoryByChatId",
       listCatalogItemsForAdmin: "conversations:listCatalogItemsForAdmin",
       listFaqEntries: "conversations:listFaqEntries",
       listHandedOffSessions: "conversations:listHandedOffSessions",
@@ -136,5 +137,30 @@ describe("ConvexAdminRepository compatibility retries", () => {
     await repository.reactivateSession("5493872222222");
 
     expect(listFallbackHandedOffSessions()).toEqual([]);
+  });
+
+  it("loads conversation history for a handed off chat", async () => {
+    const repository = new ConvexAdminRepository("https://convex.test");
+    mockQuery.mockResolvedValueOnce([
+      {
+        message: "hola",
+        reply: "buenas",
+        timestamp: 1710000000000
+      }
+    ]);
+
+    const history = await repository.getConversationHistory("5493871234567");
+
+    expect(mockQuery).toHaveBeenCalledWith(
+      "conversations:getConversationHistoryByChatId",
+      { chatId: "5493871234567" }
+    );
+    expect(history).toEqual([
+      {
+        message: "hola",
+        reply: "buenas",
+        timestamp: 1710000000000
+      }
+    ]);
   });
 });

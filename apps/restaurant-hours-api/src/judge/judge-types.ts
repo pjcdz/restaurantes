@@ -93,6 +93,7 @@ export type CategoryStats = {
   passed: number;
   avgScore: number;
   avgLatencyMs: number;
+  p95LatencyMs: number;
   totalTokens: TokenUsage;
 };
 
@@ -107,6 +108,7 @@ export type TestReport = {
   passRate: number;
   avgScore: number;
   totalDurationMs: number;
+  p95LatencyMs: number;
   totalSutTokens: TokenUsage;
   totalJudgeTokens: TokenUsage;
   categoryStats: Array<CategoryStats>;

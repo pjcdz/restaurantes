@@ -47,6 +47,8 @@ describe("Payment Handler - detectPaymentIntent", () => {
   it("should return null for non-payment messages", () => {
     expect(detectPaymentIntent("hamburguesas")).toBeNull();
     expect(detectPaymentIntent("hola")).toBeNull();
+    expect(detectPaymentIntent("agregame otra clasica")).toBeNull();
+    expect(detectPaymentIntent("quiero una clasica")).toBeNull();
   });
 });
 
@@ -132,7 +134,7 @@ describe("Payment Handler - generatePaymentMethodsResponse", () => {
     expect(response).not.toContain("Transferencia");
   });
 
-  it("should generate response for cash and transfer", () => {
+  it("still exposes only cash in pre-MVP even if future methods exist in config", () => {
     const config = {
       metodos: ["efectivo", "transferencia"],
       efectivoMinimo: 1000,
@@ -146,11 +148,8 @@ describe("Payment Handler - generatePaymentMethodsResponse", () => {
     const response = generatePaymentMethodsResponse(config);
 
     expect(response).toContain("**Efectivo**");
-    expect(response).toContain("**Transferencia bancaria**");
-    expect(response).toContain("Banco: Banco Nación");
-    expect(response).toContain("Alias: RESTAULANG.ALIAS");
-    expect(response).toContain("CUIT/CUIL: 20-12345678-9");
-    expect(response).toContain("Para transferencia, el pago debe ser adelantado");
+    expect(response).not.toContain("Transferencia");
+    expect(response).not.toContain("Banco Nación");
   });
 });
 
@@ -226,7 +225,7 @@ describe("Payment Handler - generateOrderConfirmationResponse", () => {
     expect(response).toContain("✅ ¿Confirmas el pedido?");
   });
 
-  it("should generate confirmation for transfer payment", () => {
+  it("does not mention transfer instructions even if metodoPago was set externally", () => {
     const orderDraft: ConversationOrderDraft = {
       telefono: "123456",
       items: [
@@ -252,9 +251,8 @@ describe("Payment Handler - generateOrderConfirmationResponse", () => {
 
     const response = generateOrderConfirmationResponse(orderDraft, config);
 
-    expect(response).toContain("📱 Pagando por transferencia");
-    expect(response).toContain("Debes enviar la transferencia antes de la entrega del pedido");
     expect(response).toContain("✅ ¿Confirmas el pedido?");
+    expect(response).not.toContain("transferencia");
   });
 });
 

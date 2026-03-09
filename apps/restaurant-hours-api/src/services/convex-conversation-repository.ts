@@ -153,6 +153,14 @@ export class ConvexConversationRepository implements ConversationRepository {
     }
   }
 
+  async deleteOrderForSession(sessionId: string): Promise<void> {
+    await ConvexCircuitBreaker.execute(async () => {
+      await this.client.mutation(convexApi.conversations.deletePedidoForSession, {
+        sessionId
+      });
+    });
+  }
+
   async getActivePaymentConfig(): Promise<ConversationPaymentConfig | null> {
     return (await ConvexCircuitBreaker.execute(async () => {
       return (await this.client.query(
