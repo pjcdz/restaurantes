@@ -9,6 +9,7 @@
  */
 
 import type * as conversations from "../conversations.js";
+import type * as payments from "../payments.js";
 import type * as tokenVersions from "../tokenVersions.js";
 
 import type {
@@ -19,6 +20,7 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   conversations: typeof conversations;
+  payments: typeof payments;
   tokenVersions: typeof tokenVersions;
 }>;
 

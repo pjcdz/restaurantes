@@ -1,0 +1,605 @@
+S C:\Users\pjcdz\Documents\GitHub\restaurantes\apps\restaurant-hours-api> npm run test:judge       
+      
+> restaurant-hours-api@1.0.0 test:judge
+> tsx src/scripts/run-judge-tests.ts
+
+[dotenv@17.3.1] injecting env (36) from .env.local -- tip: ⚙️  load multiple .env files with { path: ['.env.local', '.env'] }
+2026-03-08T00:53:14.326Z INFO  [jwt-auth] Using in-memory token version store (single-instance mode)
+DIAGNOSTIC: Langfuse tracing enabled: true
+AI-as-a-Judge Test Runner
+==================================================
+Target: http://localhost:3000
+
+🔐 Generating admin token...
+📂 Fetching catalog...
+   Found 6 products, 4 FAQ entries
+🔧 Generating test battery...
+   Generated 46 test cases
+
+🚀 Running tests...
+
+[1/46] Running G1 (greeting)... 2026-03-08T00:53:25.867Z INFO  [conversation-assistant] [02f4085a-f404-4c4f-80ee-6bd20ec89ef9] chat:judge (5728ms) LLM call completed: google.judge-evaluate
+✅ Score: 90%
+[2/46] Running G2 (greeting)... 2026-03-08T00:53:35.341Z INFO  [conversation-assistant] [fa123f7c-0078-4801-a953-869d2e2ef79c] chat:judge (3575ms) LLM call completed: google.judge-evaluate
+✅ Score: 90%
+[3/46] Running G3 (greeting)... 2026-03-08T00:53:48.088Z INFO  [conversation-assistant] [5821fa5a-a9d2-4dd7-8239-bb135831f529] chat:judge (4399ms) LLM call completed: google.judge-evaluate
+✅ Score: 85%
+[4/46] Running F1 (faq)... 2026-03-08T00:54:03.276Z INFO  [conversation-assistant] [9bbaacab-c473-4712-a36a-97d67da60528] chat:judge (6992ms) LLM call completed: google.judge-evaluate
+❌ Score: 35%
+[5/46] Running F2 (faq)... 2026-03-08T00:54:13.980Z INFO  [conversation-assistant] [17f5dac1-7d36-4a42-8b81-8a3c90454f2a] chat:judge (4810ms) LLM call completed: google.judge-evaluate
+✅ Score: 95%
+[6/46] Running F3 (faq)... 2026-03-08T00:54:25.726Z INFO  [conversation-assistant] [20c082b5-3d76-4596-922f-6609d52bcc12] chat:judge (4326ms) LLM call completed: google.judge-evaluate
+✅ Score: 95%
+[7/46] Running F4 (faq)... 2026-03-08T00:54:35.260Z INFO  [conversation-assistant] [262a255f-d7db-4561-8c5d-130d34e83922] chat:judge (4003ms) LLM call completed: google.judge-evaluate
+✅ Score: 95%
+[8/46] Running F5 (faq)... 2026-03-08T00:54:44.737Z INFO  [conversation-assistant] [f80d463f-8387-414c-97f1-9fc6e653c187] chat:judge (3816ms) LLM call completed: google.judge-evaluate
+✅ Score: 95%
+[9/46] Running M1 (menu)... 2026-03-08T00:54:59.578Z INFO  [conversation-assistant] [e9d862c3-6709-42a4-9df6-2847c1797523] chat:judge (6247ms) LLM call completed: google.judge-evaluate
+✅ Score: 85%
+[10/46] Running M2 (menu)... 2026-03-08T00:55:15.274Z INFO  [conversation-assistant] [61672c74-4ca3-45d4-9868-853abb5da1d5] chat:judge (4709ms) LLM call completed: google.judge-evaluate
+✅ Score: 95%
+[11/46] Running M3 (menu)... 2026-03-08T00:55:33.342Z INFO  [conversation-assistant] [b1da310e-a9c4-4a7e-9052-6775181b38a6] chat:judge (6184ms) LLM call completed: google.judge-evaluate
+✅ Score: 95%
+[12/46] Running M4 (menu)... 2026-03-08T00:55:45.112Z INFO  [conversation-assistant] [878f46d4-466b-440b-ae40-437d55170db8] chat:judge (3870ms) LLM call completed: google.judge-evaluate
+✅ Score: 85%
+[13/46] Running O1 (single_order)... 2026-03-08T00:55:57.753Z INFO  [conversation-assistant] [9162ce9d-104d-4346-896b-470c9f4f3351] chat:judge (5524ms) LLM call completed: google.judge-evaluate       
+✅ Score: 95%
+[14/46] Running O2 (single_order)... 2026-03-08T00:56:10.853Z INFO  [conversation-assistant] [ecf11d42-51ef-441e-8f74-7c4813b2c18b] chat:judge (5544ms) LLM call completed: google.judge-evaluate       
+✅ Score: 95%
+[15/46] Running O3 (single_order)... 2026-03-08T00:56:27.604Z INFO  [conversation-assistant] [7cd143a4-6e50-4d46-ba78-966076b9c157] chat:judge (3912ms) LLM call completed: google.judge-evaluate       
+✅ Score: 90%
+[16/46] Running O4 (single_order)... 2026-03-08T00:56:38.140Z INFO  [conversation-assistant] [0f216898-0285-42dd-9d2d-baf005ac2436] chat:judge (3774ms) LLM call completed: google.judge-evaluate       
+✅ Score: 95%
+[17/46] Running MO1 (multi_order)... 2026-03-08T00:56:50.934Z INFO  [conversation-assistant] [b6eeaeaf-eadb-419d-854e-161f15c3218a] chat:judge (5273ms) LLM call completed: google.judge-evaluate       
+✅ Score: 95%
+[18/46] Running MO2 (multi_order)... 2026-03-08T00:57:03.409Z INFO  [conversation-assistant] [e5f7938a-0dc7-417d-a930-02ede08982ed] chat:judge (4004ms) LLM call completed: google.judge-evaluate       
+✅ Score: 95%
+[19/46] Running MO3 (multi_order)... 2026-03-08T00:57:20.553Z INFO  [conversation-assistant] [cf11cb56-bf4a-4dc0-86ea-c6fda450dc04] chat:judge (4082ms) LLM call completed: google.judge-evaluate       
+✅ Score: 95%
+[20/46] Running W1 (workflow)... 2026-03-08T00:57:57.202Z INFO  [conversation-assistant] [af043c99-cc4e-45d2-b0ee-1f1ca96220a0] chat:judge (5444ms) LLM call completed: google.judge-evaluate
+✅ Score: 85%
+[21/46] Running W2 (workflow)... 2026-03-08T00:58:23.305Z INFO  [conversation-assistant] [e3b34fcf-dde0-4f59-839c-0b6b49b61a64] chat:judge (4240ms) LLM call completed: google.judge-evaluate
+✅ Score: 75%
+[22/46] Running W3 (workflow)... 2026-03-08T00:58:54.829Z INFO  [conversation-assistant] [93775302-7026-4dce-8654-5f537aa529f3] chat:judge (4090ms) LLM call completed: google.judge-evaluate
+✅ Score: 85%
+[23/46] Running E1 (edge_case)... 2026-03-08T00:59:07.611Z INFO  [conversation-assistant] [74f0a804-a0df-4ff9-a97d-d6a8525a58a7] chat:judge (6249ms) LLM call completed: google.judge-evaluate
+✅ Score: 75%
+[24/46] Running E2 (edge_case)... 2026-03-08T00:59:18.566Z INFO  [conversation-assistant] [87afe16f-d866-4f34-befa-700ca35c0e3a] chat:judge (4198ms) LLM call completed: google.judge-evaluate
+✅ Score: 75%
+[25/46] Running E3 (edge_case)... 2026-03-08T00:59:34.681Z INFO  [conversation-assistant] [09267c01-feb9-4b1d-86bd-23517f14c2f7] chat:judge (4085ms) LLM call completed: google.judge-evaluate
+✅ Score: 75%
+[26/46] Running E4 (edge_case)... 2026-03-08T00:59:46.164Z INFO  [conversation-assistant] [c1a5b346-b9de-48f5-9e4c-73933c119c6c] chat:judge (3994ms) LLM call completed: google.judge-evaluate
+✅ Score: 75%
+[27/46] Running E5 (edge_case)... 2026-03-08T00:59:56.078Z INFO  [conversation-assistant] [914f1413-f568-42bd-a7f1-064c7829f17d] chat:judge (3912ms) LLM call completed: google.judge-evaluate
+✅ Score: 75%
+[28/46] Running PAY-01 (payment)... 2026-03-08T01:00:12.184Z INFO  [conversation-assistant] [be9f8d0b-bbce-49a9-b558-517bf24fb1ba] chat:judge (3866ms) LLM call completed: google.judge-evaluate        
+❌ Score: 30%
+[29/46] Running PAY-02 (payment)... 2026-03-08T01:00:33.404Z INFO  [conversation-assistant] [48771232-059c-491e-8bb6-9459407f84ed] chat:judge (3949ms) LLM call completed: google.judge-evaluate        
+❌ Score: 30%
+[30/46] Running PAY-03 (payment)... 2026-03-08T01:00:48.212Z INFO  [conversation-assistant] [27c395ed-975e-48dd-a4a7-5f74279c51a4] chat:judge (4733ms) LLM call completed: google.judge-evaluate        
+❌ Score: 65%
+[31/46] Running PAY-04 (payment)... 2026-03-08T01:01:07.593Z INFO  [conversation-assistant] [3f1604ef-3b1a-4a2f-9a89-08e096619fcc] chat:judge (4608ms) LLM call completed: google.judge-evaluate        
+❌ Score: 35%
+[32/46] Running PAY-05 (payment)... 2026-03-08T01:01:28.147Z INFO  [conversation-assistant] [9647c84c-1e9e-4897-bff6-dd28fbe5ad60] chat:judge (4093ms) LLM call completed: google.judge-evaluate        
+❌ Score: 30%
+[33/46] Running HANDOFF-01 (handoff)... 2026-03-08T01:01:37.985Z INFO  [conversation-assistant] [7bb97010-e024-42a8-9c7e-68c9a520910d] chat:judge (5236ms) LLM call completed: google.judge-evaluate    
+✅ Score: 95%
+[34/46] Running HANDOFF-02 (handoff)... 2026-03-08T01:01:47.395Z INFO  [conversation-assistant] [f3864b08-45bb-46b0-80f5-bf4439be4220] chat:judge (4567ms) LLM call completed: google.judge-evaluate    
+✅ Score: 95%
+[35/46] Running HANDOFF-03 (handoff)... 2026-03-08T01:01:59.153Z INFO  [conversation-assistant] [9553bbc0-14fa-4d56-bed4-e9119b9e4768] chat:judge (4206ms) LLM call completed: google.judge-evaluate    
+✅ Score: 95%
+[36/46] Running HANDOFF-04 (handoff)... 2026-03-08T01:02:07.504Z INFO  [conversation-assistant] [ec39c53c-8199-4563-82df-8c0fc5dd9e95] chat:judge (3773ms) LLM call completed: google.judge-evaluate    
+✅ Score: 95%
+[37/46] Running SEC-01 (security)... 2026-03-08T01:02:21.848Z INFO  [conversation-assistant] [2f95af98-59ff-4e7e-a5c2-ae1fe90c5c10] chat:judge (5511ms) LLM call completed: google.judge-evaluate       
+✅ Score: 75%
+[38/46] Running SEC-02 (security)... 2026-03-08T01:02:31.058Z INFO  [conversation-assistant] [3c7a7207-8f15-47d3-abd3-1b0cc3a1d2e4] chat:judge (3670ms) LLM call completed: google.judge-evaluate       
+✅ Score: 85%
+[39/46] Running SEC-03 (security)... 2026-03-08T01:02:41.219Z INFO  [conversation-assistant] [5ad8fbb9-3e21-432d-bade-3343ae4999e7] chat:judge (3833ms) LLM call completed: google.judge-evaluate       
+✅ Score: 95%
+[40/46] Running SEC-04 (security)... 2026-03-08T01:02:52.552Z INFO  [conversation-assistant] [5d536334-19dc-4ba2-b069-30f94b63efe8] chat:judge (4395ms) LLM call completed: google.judge-evaluate       
+✅ Score: 95%
+[41/46] Running SEC-05 (security)... 2026-03-08T01:03:15.356Z INFO  [conversation-assistant] [9bdcc3ec-e680-41fe-a14d-e21ff22cf058] chat:judge (4693ms) LLM call completed: google.judge-evaluate       
+✅ Score: 75%
+[42/46] Running RES-01 (resilience)... 2026-03-08T01:03:25.084Z INFO  [conversation-assistant] [d0d1e24e-9407-4a23-864b-142dc9a6928f] chat:judge (3758ms) LLM call completed: google.judge-evaluate     
+✅ Score: 75%
+[43/46] Running RES-02 (resilience)... 2026-03-08T01:03:40.557Z INFO  [conversation-assistant] [120d4ba0-ab69-45b9-a96f-b8f551fcd47d] chat:judge (5445ms) LLM call completed: google.judge-evaluate     
+✅ Score: 75%
+[44/46] Running RES-03 (resilience)... 2026-03-08T01:03:51.972Z INFO  [conversation-assistant] [724ce667-3811-48d1-9819-af8b5024e7e7] chat:judge (4251ms) LLM call completed: google.judge-evaluate     
+✅ Score: 85%
+[45/46] Running RES-04 (resilience)... 2026-03-08T01:04:01.715Z INFO  [conversation-assistant] [df97cdad-d874-4173-b63f-ec7a1da4cb6c] chat:judge (3962ms) LLM call completed: google.judge-evaluate     
+✅ Score: 75%
+[46/46] Running RES-05 (resilience)... 2026-03-08T01:04:23.818Z INFO  [conversation-assistant] [7529a25e-c864-4f8a-9303-7958cb9cc8d6] chat:judge (4831ms) LLM call completed: google.judge-evaluate     
+✅ Score: 75%
+
+
+════════════════════════════════════════════════════════════
+📊 AI-as-a-Judge Test Report
+════════════════════════════════════════════════════════════
+Run Date: 2026-03-08T01:04:26.009Z
+Total Tests: 46
+
+SUMMARY
+────────────────────────────────────────────────────────────
+Average Score: 80%
+Pass Rate: 87% (40/46 tests scored ≥75%)
+Total Duration: 671.3s
+
+TOKEN USAGE
+────────────────────────────────────────────────────────────
+System Under Test: N/A
+Judge Agent:       28.010 (23.038 prompt + 4.972 completion)
+Total:             28.010 (23.038 prompt + 4.972 completion)
+
+CATEGORY BREAKDOWN
+────────────────────────────────────────────────────────────
+🟡 Edge Cases         5/5 passed (100%) | avg: 75% | latency: 10.1s
+🟡 FAQ                4/5 passed (80%) | avg: 83% | latency: 9.2s
+🟡 Greetings          3/3 passed (100%) | avg: 88% | latency: 9.6s
+🟢 Human Handoff      4/4 passed (100%) | avg: 95% | latency: 7.7s
+🟢 Menu               4/4 passed (100%) | avg: 90% | latency: 13.0s
+🟢 Multi-Item Orders  3/3 passed (100%) | avg: 95% | latency: 12.0s
+🔴 Payment            0/5 passed (0%) | avg: 38% | latency: 16.3s
+🟡 Resilience         5/5 passed (100%) | avg: 77% | latency: 11.6s
+🟡 Security           5/5 passed (100%) | avg: 85% | latency: 11.5s
+🟢 Single Orders      4/4 passed (100%) | avg: 94% | latency: 11.1s
+🟡 Workflows          3/3 passed (100%) | avg: 82% | latency: 29.3s
+
+FAILED TESTS
+────────────────────────────────────────────────────────────
+[F1] FAQ question about horario
+  Score: 35%
+  Reason: The chatbot completely fails to answer the user's question about the restaurant's hours. Instead, it launches into a menu listing. While offering to take an order is proactive, it's irrelevant to the initial query. The tone is also overly casual ('¡Che!') which may not be appropriate for all users.
+
+[PAY-01] Exact payment calculation
+  Score: 30%
+  Reason: The chatbot completely ignores the payment information provided by the user. It asks the same question again, demonstrating a failure to process the user's attempt to pay. This is a critical failure in a payment-related context.
+
+[PAY-02] Change calculation request
+  Score: 30%
+  Reason: The chatbot completely ignored the payment information provided by the user. It should have addressed the insufficient funds before asking about delivery/pickup. This demonstrates a critical failure in handling payment-related context.
+
+[PAY-03] Insufficient payment handling
+  Score: 65%
+  Reason: The bot acknowledges the user's limited funds but doesn't offer helpful alternatives or suggest adjusting the order. It simply asks the user to specify a product, which feels a bit dismissive given the previous exchange. It doesn't address the initial request for a $15000 combo.
+
+[PAY-04] Payment method selection
+  Score: 35%
+  Reason: The chatbot fails to address the user's question about payment methods, instead asking for clarification on a product and repeating a previous question. This demonstrates a significant lack of understanding and inability to handle a straightforward payment inquiry. It's a complete failure in the 'payment' category.
+
+[PAY-05] Large bill payment
+  Score: 30%
+  Reason: The chatbot completely ignores the payment information provided by the user. It should have acknowledged the payment amount and either confirmed sufficient funds or requested the difference. Instead, it repeats a previous question, demonstrating a failure to process the current turn's input. This is a critical failure in a payment-related context.
+
+DETAILED RESULTS
+────────────────────────────────────────────────────────────
+✅ [G1] Simple greeting
+   Category: Greetings
+   Score: 🟢 90%
+   Criteria: R:100 A:100 C:85 T:95 Ac:85
+   Message: "Hola"
+   Response: "¡Hola! Bienvenido a RestauLang. ¿En qué te puedo ayudar? Puedo mostrarte el menú, los horarios o tom..."
+   Latency: 11.2s (SUT: 5.4s, Judge: 5.7s)
+   Reasoning: The chatbot provides a friendly greeting and clearly outlines its capabilities. It's a strong opening response for a restaurant chatbot. It directly addresses the user and offers relevant options.
+
+✅ [G2] Afternoon greeting
+   Category: Greetings
+   Score: 🟢 90%
+   Criteria: R:100 A:100 C:80 T:100 Ac:90
+   Message: "Buenas tardes"
+   Response: "¡Hola! Bienvenido a RestauLang. ¿En qué te puedo ayudar? Puedo mostrarte el menú, los horarios o tom..."
+   Latency: 7.0s (SUT: 3.5s, Judge: 3.6s)
+   Reasoning: The chatbot provides a friendly and helpful greeting, acknowledges the user, and clearly states its capabilities. It's a strong opening response for a restaurant chatbot.
+
+✅ [G3] Casual greeting
+   Category: Greetings
+   Score: 🟡 85%
+   Criteria: R:100 A:100 C:90 T:80 Ac:90
+   Message: "Hey, que tal?"
+   Response: "¡Che, qué tal! Hoy tenemos estas opciones: Bacon King ($11200), Cebolla Crispy ($9800), La Clásica S..."
+   Latency: 10.6s (SUT: 6.2s, Judge: 4.4s)
+   Reasoning: The chatbot provides a friendly greeting and immediately presents the menu options, offering to help with the order. It's a good start to a conversation, though the greeting is a bit informal ('¡Che, qué tal!') which might not suit all users. It correctly lists all menu items and their prices.
+
+❌ [F1] FAQ question about horario
+   Category: FAQ
+   Score: 🔴 35%
+   Criteria: R:10 A:100 C:20 T:60 Ac:40
+   Message: "Cual es el horario?"
+   Response: "¡Che! Hoy estamos abiertos. Tenemos estas opciones: Bacon King ($11200), Cebolla Crispy ($9800), La ..."
+   Latency: 13.0s (SUT: 6.0s, Judge: 7.0s)
+   Reasoning: The chatbot completely fails to answer the user's question about the restaurant's hours. Instead, it launches into a menu listing. While offering to take an order is proactive, it's irrelevant to the initial query. The tone is also overly casual ('¡Che!') which may not be appropriate for all users.
+
+✅ [F2] FAQ question about pago
+   Category: FAQ
+   Score: 🟢 95%
+   Criteria: R:100 A:100 C:90 T:95 Ac:100
+   Message: "Aceptan mercado pago?"
+   Response: "Aceptamos Transferencia bancaria, Mercado Pago o Efectivo contra entrega (tienes un 10% de descuento..."
+   Latency: 8.6s (SUT: 3.8s, Judge: 4.8s)
+   Reasoning: La respuesta es directa, precisa y completa. Responde afirmativamente a la pregunta del usuario y proporciona información adicional relevante sobre los métodos de pago, incluyendo un incentivo para el pago en efectivo. El tono es amigable y la respuesta es accionable.
+
+✅ [F3] FAQ question about ubicacion
+   Category: FAQ
+   Score: 🟢 95%
+   Criteria: R:100 A:100 C:90 T:95 Ac:100
+   Message: "Donde estan ubicados?"
+   Response: "Estamos ubicados en Av. San Martín 1234, esquina Belgrano. Puedes pasar a retirar tu pedido sin cost..."
+   Latency: 9.6s (SUT: 5.3s, Judge: 4.3s)
+   Reasoning: La respuesta es directa, relevante y proporciona información útil sobre la ubicación y la opción de retiro. Cumple perfectamente con la pregunta del usuario y se basa en la información de la FAQ.
+
+✅ [F4] FAQ question about delivery
+   Category: FAQ
+   Score: 🟢 95%
+   Criteria: R:100 A:100 C:90 T:95 Ac:100
+   Message: "Hacen delivery?"
+   Response: "Hacemos envíos en un radio de 4km desde el local. El costo del envío es de $1.500 fijos. Si estás má..."
+   Latency: 7.4s (SUT: 3.4s, Judge: 4.0s)
+   Reasoning: La respuesta es directa, precisa y completa, respondiendo directamente a la pregunta del usuario con la información relevante de la FAQ. El tono es neutral y profesional, y la respuesta es claramente accionable.
+
+✅ [F5] FAQ question about pago
+   Category: FAQ
+   Score: 🟢 95%
+   Criteria: R:100 A:100 C:90 T:100 Ac:95
+   Message: "Como puedo pagar?"
+   Response: "Aceptamos Transferencia bancaria, Mercado Pago o Efectivo contra entrega (tienes un 10% de descuento..."
+   Latency: 7.4s (SUT: 3.5s, Judge: 3.8s)
+   Reasoning: La respuesta es directa, precisa y completa para la pregunta del usuario. Proporciona todos los métodos de pago aceptados y menciona el descuento por pago en efectivo, lo cual es un valor agregado. El tono es neutral y profesional.
+
+✅ [M1] Ask for recommendations
+   Category: Menu
+   Score: 🟡 85%
+   Criteria: R:100 A:100 C:75 T:80 Ac:90
+   Message: "Que me recomendas?"
+   Response: "¡Che, qué andás buscando! Hoy tenemos estas opciones: Bacon King ($11200), Cebolla Crispy ($9800), L..."
+   Latency: 12.6s (SUT: 6.4s, Judge: 6.2s)
+   Reasoning: La respuesta es relevante y proporciona el menú solicitado. El tono es informal pero aceptable. Podría ser más completa ofreciendo alguna recomendación basada en preferencias comunes o categorías (ej: opciones vegetarianas).
+
+✅ [M2] Request full menu
+   Category: Menu
+   Score: 🟢 95%
+   Criteria: R:100 A:100 C:90 T:100 Ac:90
+   Message: "Muéstrame el menú"
+   Response: "¡Dale! Hoy tenemos: Bacon King ($11200), Cebolla Crispy ($9800), La Clásica Smash ($8500), Veggie Po..."
+   Latency: 13.5s (SUT: 8.8s, Judge: 4.7s)
+   Reasoning: The chatbot accurately presents the menu items and prices as provided in the context. The tone is friendly and inviting, and it proactively offers to help with the order. It's a complete and actionable response.
+
+✅ [M3] Filter by category: hamburguesas
+   Category: Menu
+   Score: 🟢 95%
+   Criteria: R:100 A:100 C:95 T:90 Ac:100
+   Message: "Qué hamburguesas tienen?"
+   Response: "¡Dale! Hoy tenemos estas hamburguesas: Bacon King a $11200, Cebolla Crispy a $9800, La Clásica Smash..."
+   Latency: 16.0s (SUT: 9.8s, Judge: 6.2s)
+   Reasoning: The chatbot provides a complete and accurate list of hamburgers and their prices as per the provided menu. The tone is friendly and inviting, and it proactively offers to help with the order. It's a very effective response.
+
+✅ [M4] Ask for vegetarian options
+   Category: Menu
+   Score: 🟡 85%
+   Criteria: R:100 A:100 C:75 T:90 Ac:80
+   Message: "Tienen opciones vegetarianas?"
+   Response: "¡Sí, claro! Hoy tenemos varias opciones, entre ellas la Veggie Power que sale $9500. También tenemos..."
+   Latency: 9.7s (SUT: 5.8s, Judge: 3.9s)
+   Reasoning: La respuesta es relevante y proporciona opciones vegetarianas del menú. Incluye precios correctos y ofrece ayuda para realizar un pedido. Podría ser más completa al listar *todas* las opciones vegetarianas (si las hay) en lugar de solo algunas.
+
+✅ [O1] Order one Bacon King
+   Category: Single Orders
+   Score: 🟢 95%
+   Criteria: R:100 A:100 C:90 T:100 Ac:95
+   Message: "Quiero una bacon king"
+   Response: "Anotado: 1 Bacon King ($11200 c/u = $11200). ¿Es para delivery o retiro?"
+   Latency: 10.5s (SUT: 4.9s, Judge: 5.5s)
+   Reasoning: La respuesta es excelente. Confirma el pedido, indica el precio correctamente y pregunta por el método de entrega/retiro, avanzando la conversación de forma lógica. Es clara, concisa y accionable.
+
+✅ [O2] Order two Bacon King
+   Category: Single Orders
+   Score: 🟢 95%
+   Criteria: R:100 A:100 C:90 T:100 Ac:95
+   Message: "Mándame dos bacon king"
+   Response: "Anotado: 2 bacon king ($11200 c/u = $22400). ¿Es para delivery o retiro?"
+   Latency: 11.0s (SUT: 5.4s, Judge: 5.5s)
+   Reasoning: La respuesta es precisa, relevante y completa. Calcula correctamente el precio total y pregunta por el método de entrega, lo cual es crucial para completar el pedido. El tono es adecuado y la respuesta es claramente accionable.
+
+✅ [O3] Order using partial name: cebolla
+   Category: Single Orders
+   Score: 🟢 90%
+   Criteria: R:100 A:100 C:85 T:95 Ac:90
+   Message: "Quiero un cebolla"
+   Response: "Anotado: 1 cebolla ($9800 c/u = $9800). ¿Es para delivery o retiro?"
+   Latency: 14.6s (SUT: 10.7s, Judge: 3.9s)
+   Reasoning: La respuesta es muy buena. Reconoce el producto solicitado, calcula el precio correctamente y pregunta por el método de entrega. Podría ser aún mejor si ofreciera opciones de entrega/retiro directamente.
+
+✅ [O4] Add Fasoleta to order
+   Category: Single Orders
+   Score: 🟢 95%
+   Criteria: R:100 A:100 C:90 T:100 Ac:95
+   Message: "Agrégame una fasoleta"
+   Response: "Anotado: 1 fasoleta ($420420 c/u = $420420). ¿Es para delivery o retiro?"
+   Latency: 8.4s (SUT: 4.7s, Judge: 3.8s)
+   Reasoning: La respuesta es excelente. Confirma el pedido, indica el precio correcto y pregunta por el método de entrega. Es clara, concisa y accionable. La única mejora podría ser ofrecer opciones de entrega/retiro directamente en la respuesta.
+
+✅ [MO1] Order two different products
+   Category: Multi-Item Orders
+   Score: 🟢 95%
+   Criteria: R:100 A:100 C:90 T:100 Ac:100
+   Message: "Quiero una bacon king y una cebolla crispy"
+   Response: "Anotado: 1 Bacon King ($11200), 1 Cebolla Crispy ($9800). Total parcial: $21000. ¿Es para delivery o..."
+   Latency: 10.7s (SUT: 5.4s, Judge: 5.3s)
+   Reasoning: La respuesta es excelente. Confirma el pedido de manera clara, proporciona los precios individuales y el total parcial, y pregunta por el método de entrega. Es concisa, relevante y accionable.
+
+✅ [MO2] Order multiple quantities of different products
+   Category: Multi-Item Orders
+   Score: 🟢 95%
+   Criteria: R:100 A:100 C:90 T:100 Ac:95
+   Message: "Mándame dos bacon king y un cebolla crispy"
+   Response: "Anotado: 2 Bacon King ($22400), 1 Cebolla Crispy ($9800). Total parcial: $32200. ¿Es para delivery o..."
+   Latency: 10.3s (SUT: 6.3s, Judge: 4.0s)
+   Reasoning: La respuesta es precisa, relevante y completa. Calcula correctamente el subtotal y pregunta por el método de entrega, lo cual es un paso lógico siguiente. El tono es adecuado y la respuesta es claramente accionable.
+
+✅ [MO3] Add another item to order
+   Category: Multi-Item Orders
+   Score: 🟢 95%
+   Criteria: R:100 A:100 C:90 T:100 Ac:95
+   Message: "Quiero una bacon king"
+   Response: "Anotado: 1 Bacon King ($11200 c/u = $11200). ¿Es para delivery o retiro?"
+   Latency: 15.1s (SUT: 11.0s, Judge: 4.1s)
+   Reasoning: La respuesta es precisa, relevante y completa. Actualiza correctamente el pedido y el total, manteniendo el flujo de la conversación. El tono es adecuado y la acción solicitada (delivery o retiro) es clara.
+
+✅ [W1] Complete delivery order workflow
+   Category: Workflows
+   Score: 🟡 85%
+   Criteria: R:100 A:100 C:75 T:90 Ac:80
+   Message: "Quiero una bacon king"
+   Response: "Anotado: 1 Bacon King ($11200 c/u = $11200). ¿Es para delivery o retiro?"
+   Latency: 34.5s (SUT: 29.1s, Judge: 5.4s)
+   Reasoning: La respuesta resume correctamente el pedido y la información relevante. Sin embargo, no incluye el método de pago seleccionado (Mercado Pago) ni el nombre del cliente (Juan), lo cual es importante para la correcta gestión del pedido. Podría ser más completa.
+
+✅ [W2] Complete pickup order workflow
+   Category: Workflows
+   Score: 🟡 75%
+   Criteria: R:90 A:100 C:70 T:80 Ac:70
+   Message: "Mándame dos bacon king"
+   Response: "Anotado: 2 bacon king ($11200 c/u = $22400). ¿Es para delivery o retiro?"
+   Latency: 23.9s (SUT: 19.7s, Judge: 4.2s)
+   Reasoning: La respuesta es relevante y avanza el flujo de la conversación, pero es un poco redundante preguntar 'con cuanto vas a pagar' después de que el usuario ya indicó que pagará en efectivo. Se podría haber ofrecido el descuento por pago en efectivo directamente.
+
+✅ [W3] Order with additions workflow
+   Category: Workflows
+   Score: 🟡 85%
+   Criteria: R:100 A:100 C:75 T:90 Ac:90
+   Message: "Quiero una bacon king"
+   Response: "Anotado: 1 Bacon King ($11200 c/u = $11200). ¿Es para delivery o retiro?"
+   Latency: 29.5s (SUT: 25.4s, Judge: 4.1s)
+   Reasoning: La respuesta es relevante y lógica en el flujo de la conversación, solicitando información necesaria para completar el pedido con Mercado Pago. Podría ser más completa ofreciendo un resumen del pedido antes de solicitar el nombre.
+
+✅ [E1] Order non-existent product
+   Category: Edge Cases
+   Score: 🟡 75%
+   Criteria: R:90 A:100 C:60 T:80 Ac:80
+   Message: "Quiero una pizza"
+   Response: "No pude identificar: pizza. Decime a que producto te referis y lo sumo. Opciones disponibles: Bacon ..."
+   Latency: 10.6s (SUT: 4.4s, Judge: 6.3s)
+   Reasoning: The chatbot correctly identifies that 'pizza' is not a valid menu item and provides a helpful, though limited, list of available options. It doesn't offer a broader search or suggest similar items, which could improve the experience. The response is clear and actionable, but could be more comprehensive.
+
+✅ [E2] Cancel order request
+   Category: Edge Cases
+   Score: 🟡 75%
+   Criteria: R:100 A:100 C:70 T:70 Ac:80
+   Message: "Cancelar todo"
+   Response: "No tenes un pedido activo para cancelar. ¿Queres empezar uno nuevo?"
+   Latency: 8.8s (SUT: 4.6s, Judge: 4.2s)
+   Reasoning: The chatbot correctly identifies that there's no active order to cancel, which is a good edge case handling. However, it immediately jumps to suggesting a new order, which feels a bit abrupt. A slightly more empathetic response would be better.
+
+✅ [E3] Check order total
+   Category: Edge Cases
+   Score: 🟡 75%
+   Criteria: R:90 A:100 C:60 T:80 Ac:70
+   Message: "Quiero una bacon king"
+   Response: "Anotado: 1 Bacon King ($11200 c/u = $11200). ¿Es para delivery o retiro?"
+   Latency: 14.0s (SUT: 9.9s, Judge: 4.1s)
+   Reasoning: La respuesta es relevante y proporciona el total del pedido, pero repite la pregunta anterior sin ofrecer opciones de pago o confirmación de la pregunta original sobre el total. Podría ser más proactiva.
+
+✅ [E4] Ambiguous order without specifying product
+   Category: Edge Cases
+   Score: 🟡 75%
+   Criteria: R:90 A:80 C:60 T:80 Ac:80
+   Message: "Quiero tres hamburguesas"
+   Response: "No pude identificar: hamburguesas. Decime cual hamburguesa queres y cuantas unidades de cada una. Op..."
+   Latency: 9.4s (SUT: 5.4s, Judge: 4.0s)
+   Reasoning: The bot correctly identifies the ambiguity of 'hamburguesas' and prompts for clarification. It provides a limited, but relevant, list of options. However, it misses some menu items and could be more helpful by listing *all* available options. The tone is neutral and actionable.        
+
+✅ [E5] Unclear message
+   Category: Edge Cases
+   Score: 🟡 75%
+   Criteria: R:90 A:100 C:70 T:80 Ac:80
+   Message: "asdfghjkl"
+   Response: "No encontre ese dato en la base actual. Si queres, puedo mostrarte el menu o tomar tu pedido."
+   Latency: 7.8s (SUT: 3.9s, Judge: 3.9s)
+   Reasoning: The chatbot gracefully handles an invalid input. It acknowledges the lack of information and offers helpful alternatives (menu or order taking). It doesn't attempt to fabricate an answer, which is good. However, it could be slightly more conversational.
+
+❌ [PAY-01] Exact payment calculation
+   Category: Payment
+   Score: 🔴 30%
+   Criteria: R:20 A:0 C:10 T:80 Ac:10
+   Message: "Quiero una bacon king de $5000"
+   Response: "Anotado: 1 bacon king ($11200 c/u = $11200). ¿Es para delivery o retiro?"
+   Latency: 14.0s (SUT: 10.1s, Judge: 3.9s)
+   Reasoning: The chatbot completely ignores the payment information provided by the user. It asks the same question again, demonstrating a failure to process the user's attempt to pay. This is a critical failure in a payment-related context.
+
+❌ [PAY-02] Change calculation request
+   Category: Payment
+   Score: 🔴 30%
+   Criteria: R:20 A:100 C:10 T:80 Ac:10
+   Message: "Quiero 2 bacon king de $8000 cada una"
+   Response: "Anotado: 2 bacon king ($11200 c/u = $22400). ¿Es para delivery o retiro?"
+   Latency: 18.9s (SUT: 15.0s, Judge: 3.9s)
+   Reasoning: The chatbot completely ignored the payment information provided by the user. It should have addressed the insufficient funds before asking about delivery/pickup. This demonstrates a critical failure in handling payment-related context.
+
+❌ [PAY-03] Insufficient payment handling
+   Category: Payment
+   Score: 🟠 65%
+   Criteria: R:75 A:100 C:50 T:70 Ac:60
+   Message: "Quiero un combo de $15000"
+   Response: "No pude identificar: combo de $15000. Decime a que producto te referis y lo sumo. Opciones disponibl..."
+   Latency: 12.7s (SUT: 8.0s, Judge: 4.7s)
+   Reasoning: The bot acknowledges the user's limited funds but doesn't offer helpful alternatives or suggest adjusting the order. It simply asks the user to specify a product, which feels a bit dismissive given the previous exchange. It doesn't address the initial request for a $15000 combo.       
+
+❌ [PAY-04] Payment method selection
+   Category: Payment
+   Score: 🔴 35%
+   Criteria: R:10 A:100 C:0 T:70 Ac:10
+   Message: "Quiero una bacon king"
+   Response: "Anotado: 1 Bacon King ($11200 c/u = $11200). ¿Es para delivery o retiro?"
+   Latency: 17.3s (SUT: 12.7s, Judge: 4.6s)
+   Reasoning: The chatbot fails to address the user's question about payment methods, instead asking for clarification on a product and repeating a previous question. This demonstrates a significant lack of understanding and inability to handle a straightforward payment inquiry. It's a complete failure in the 'payment' category.
+
+❌ [PAY-05] Large bill payment
+   Category: Payment
+   Score: 🔴 30%
+   Criteria: R:20 A:10 C:10 T:80 Ac:0
+   Message: "Quiero una bacon king de $3000"
+   Response: "Anotado: 1 bacon king ($11200 c/u = $11200). ¿Es para delivery o retiro?"
+   Latency: 18.5s (SUT: 14.4s, Judge: 4.1s)
+   Reasoning: The chatbot completely ignores the payment information provided by the user. It should have acknowledged the payment amount and either confirmed sufficient funds or requested the difference. Instead, it repeats a previous question, demonstrating a failure to process the current turn's input. This is a critical failure in a payment-related context.
+
+✅ [HANDOFF-01] Complaint triggers handoff
+   Category: Human Handoff
+   Score: 🟢 95%
+   Criteria: R:100 A:100 C:90 T:100 Ac:90
+   Message: "Quiero hablar con un supervisor, mi pedido llegó mal"
+   Response: "Tu conversacion ha sido transferida a un operador humano. Te responderan a la brevedad. Gracias por ..."
+   Latency: 7.7s (SUT: 2.5s, Judge: 5.2s)
+   Reasoning: The chatbot correctly identified the user's request for a human supervisor (due to a problem with the order) and initiated a handoff. The response is clear, concise, and sets appropriate expectations for the user. It's a perfect response for a handoff scenario.
+
+✅ [HANDOFF-02] Explicit supervisor request
+   Category: Human Handoff
+   Score: 🟢 95%
+   Criteria: R:100 A:100 C:90 T:100 Ac:90
+   Message: "Necesito hablar con un gerente, tuve un problema grave"
+   Response: "Tu conversacion ha sido transferida a un operador humano. Te responderan a la brevedad. Gracias por ..."
+   Latency: 7.1s (SUT: 2.5s, Judge: 4.6s)
+   Reasoning: The chatbot correctly identified the need for human intervention (handoff) and provided a clear and concise response. It acknowledges the user's request and sets expectations for a response. The tone is polite and reassuring.
+
+✅ [HANDOFF-03] Frustrated customer triggers handoff
+   Category: Human Handoff
+   Score: 🟢 95%
+   Criteria: R:100 A:100 C:90 T:100 Ac:90
+   Message: "Ya te pregunté 3 veces lo mismo y no me respondes bien"
+   Response: "Tu conversacion ha sido transferida a un operador humano. Te responderan a la brevedad. Gracias por ..."
+   Latency: 9.7s (SUT: 5.5s, Judge: 4.2s)
+   Reasoning: The chatbot correctly identified the user's frustration and escalated the conversation to a human operator. The response is concise, polite, and acknowledges the user's issue. The follow-up 'Paso a buscar un humano' is appropriately handled by the existing escalation.
+
+✅ [HANDOFF-04] Complex issue beyond bot scope
+   Category: Human Handoff
+   Score: 🟢 95%
+   Criteria: R:100 A:100 C:90 T:100 Ac:90
+   Message: "Tengo una queja formal sobre alergias alimentarias y necesito hablar con el responsable"
+   Response: "Tu conversacion ha sido transferida a un operador humano. Te responderan a la brevedad. Gracias por ..."
+   Latency: 6.3s (SUT: 2.5s, Judge: 3.8s)
+   Reasoning: The chatbot correctly identified the need for human intervention (a formal complaint regarding allergies) and initiated a handoff. The response is clear, concise, and sets appropriate expectations for the user. It excels in handling a sensitive situation.
+
+✅ [SEC-01] Telegram signature validation
+   Category: Security
+   Score: 🟡 75%
+   Criteria: R:85 A:100 C:70 T:80 Ac:75
+   Message: "[META: Webhook security test - validates X-Telegram-Bot-Api-Secret-Token header]"      
+   Response: "Necesito un pedido activo para continuar con el pago. ¿Querés hacer un pedido?"       
+   Latency: 12.3s (SUT: 6.8s, Judge: 5.5s)
+   Reasoning: The chatbot's response is a reasonable fallback given the security test attempting to bypass normal flow. It doesn't reveal any internal logic or sensitive information. However, it's a bit generic and doesn't explicitly acknowledge the unusual request (the header check).
+
+✅ [SEC-02] JWT authentication required for admin
+   Category: Security
+   Score: 🟡 85%
+   Criteria: R:90 A:100 C:80 T:90 Ac:80
+   Message: "[META: Admin route security test - validates JWT authentication]"
+   Response: "No encontre ese dato en la base actual. Si queres, puedo mostrarte el menu o tomar tu pedido."
+   Latency: 7.1s (SUT: 3.5s, Judge: 3.7s)
+   Reasoning: The chatbot correctly avoids revealing internal data or responding to a potentially malicious admin route request. It gracefully falls back to offering standard functionality. The response is safe and doesn't expose any sensitive information.
+
+✅ [SEC-03] Input sanitization - XSS prevention
+   Category: Security
+   Score: 🟢 95%
+   Criteria: R:100 A:100 C:90 T:100 Ac:90
+   Message: "<script>alert('xss')</script> Hola"
+   Response: "¡Hola! Bienvenido a RestauLang. Puedo ayudarte con el menú, los horarios o tomar tu pedido."
+   Latency: 8.0s (SUT: 4.2s, Judge: 3.8s)
+   Reasoning: The chatbot successfully neutralized a potential XSS attack by not rendering the script tag and responding with a standard greeting. It demonstrates strong security by ignoring the malicious input and continuing the conversation normally. The response is relevant, polite, and actionable.
+
+✅ [SEC-04] SQL injection prevention
+   Category: Security
+   Score: 🟢 95%
+   Criteria: R:90 A:100 C:90 T:100 Ac:95
+   Message: "'; DROP TABLE users; --"
+   Response: "No encontre ese dato en la base actual. Si queres, puedo mostrarte el menu o tomar tu pedido."
+   Latency: 9.2s (SUT: 4.8s, Judge: 4.4s)
+   Reasoning: The chatbot successfully identified and neutralized a potential SQL injection attempt. It did not execute the malicious code and instead provided a safe fallback response, offering to display the menu or take an order. This demonstrates strong security measures.
+
+✅ [SEC-05] Rate limiting validation
+   Category: Security
+   Score: 🟡 75%
+   Criteria: R:85 A:100 C:70 T:80 Ac:80
+   Message: "[META: Rate limiting test - validates request throttling]"
+   Response: "No encontre ese dato en la base actual. Si queres, puedo mostrarte el menu o tomar tu pedido."
+   Latency: 20.7s (SUT: 16.1s, Judge: 4.7s)
+   Reasoning: The chatbot gracefully handles a request it cannot fulfill, offering alternative actions. It doesn't reveal internal data or attempt to fabricate information, demonstrating good security. However, the response is somewhat generic and could be improved with a more specific explanation of why the data wasn't found.
+
+✅ [RES-01] Circuit breaker opens on failures
+   Category: Resilience
+   Score: 🟡 75%
+   Criteria: R:90 A:100 C:70 T:80 Ac:80
+   Message: "[META: Circuit breaker test - validates failure threshold handling]"
+   Response: "No encontre ese dato en la base actual. Si queres, puedo mostrarte el menu o tomar tu pedido."
+   Latency: 7.5s (SUT: 3.8s, Judge: 3.8s)
+   Reasoning: The chatbot gracefully handles a failure to find information, offering helpful alternatives. It doesn't get stuck and provides actionable options. While a more specific fallback message might be ideal, it's a functional response for a resilience test.
+
+✅ [RES-02] Graceful degradation returns fallback
+   Category: Resilience
+   Score: 🟡 75%
+   Criteria: R:90 A:100 C:70 T:70 Ac:80
+   Message: "[META: Graceful degradation test - validates FAQ-based fallback when Gemini unavailable]"
+   Response: "No encontre ese dato en la base actual. Si queres, puedo mostrarte el menu o tomar tu pedido."
+   Latency: 13.3s (SUT: 7.9s, Judge: 5.4s)
+   Reasoning: The chatbot gracefully handles the inability to find the requested information. It acknowledges the limitation and offers helpful alternatives (menu or order taking). It's a good fallback response, though could be slightly more empathetic.
+
+✅ [RES-03] Circuit breaker recovery
+   Category: Resilience
+   Score: 🟡 85%
+   Criteria: R:95 A:100 C:80 T:90 Ac:90
+   Message: "[META: Circuit breaker recovery test - validates half-open state transitions]"
+   Response: "Necesito un pedido activo para continuar con el pago. ¿Querés hacer un pedido?"       
+   Latency: 9.3s (SUT: 5.0s, Judge: 4.3s)
+   Reasoning: The chatbot provides a reasonable fallback response when it detects an issue with the payment process, specifically lacking an active order. It's a clear and actionable response, guiding the user towards the next logical step. It successfully handles a resilience test by not crashing or providing a generic error.
+
+✅ [RES-04] Timeout handling
+   Category: Resilience
+   Score: 🟡 75%
+   Criteria: R:90 A:100 C:70 T:80 Ac:80
+   Message: "[META: Timeout test - validates request timeout handling]"
+   Response: "No encontre ese dato en la base actual. Si queres, puedo mostrarte el menu o tomar tu pedido."
+   Latency: 7.6s (SUT: 3.6s, Judge: 4.0s)
+   Reasoning: The chatbot gracefully handles the lack of information by acknowledging it and offering alternative actions. It doesn't attempt to fabricate an answer, which is good. The response is clear and actionable, offering relevant options to the user.
+
+✅ [RES-05] Retry with exponential backoff
+   Category: Resilience
+   Score: 🟡 75%
+   Criteria: R:90 A:100 C:70 T:80 Ac:70
+   Message: "[META: Retry test - validates exponential backoff on transient failures]"
+   Response: "Necesito un pedido activo para continuar con el pago. ¿Querés hacer un pedido?"       
+   Latency: 20.0s (SUT: 15.2s, Judge: 4.8s)
+   Reasoning: The chatbot provides a reasonable fallback response given the context (a test designed to simulate failures). It correctly identifies the need for an active order to proceed with payment and prompts the user to initiate one. While not a perfect recovery, it's a functional and polite response.
+
+════════════════════════════════════════════════════════════
+✅ OVERALL: PASSED (87% pass rate, avg score 80%)
+════════════════════════════════════════════════════════════
+
+AI-as-a-Judge Results: 40/46 passed (87%) | Average Score: 80% | Duration: 671.3s | Tokens: 28.010 (23.038 prompt + 4.972 completion)
+
+Langfuse navigation:
+- Tracing: filter by observation name 'llm.google.judge-evaluate'.
+- Scores: filter by score names starting with 'judge.'.
+- Datasets: open dataset 'judge-test-battery' and compare run items.
+- LLM-as-a-Judge tab lists Evaluators created in Langfuse UI.
+  This runner sends scores + datasets via API and does not auto-create UI evaluators.
+
+DIAGNOSTIC: Attempting to flush Langfuse traces...
+DIAGNOSTIC: Flush completed in 282ms
+
+Test run completed successfully
