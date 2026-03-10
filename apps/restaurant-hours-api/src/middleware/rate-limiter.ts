@@ -408,3 +408,24 @@ export const apiRateLimiter = createRateLimiter({
   maxRequests: 100,       // 100 requests per minute
   blockDurationMs: 300000 // 5 minutes
 });
+
+/**
+ * Pre-configured rate limiter for Kapso webhook.
+ * More lenient to handle legitimate message bursts.
+ * Rate limits by session ID or phone number from request body.
+ *
+ * - 60 requests per minute per session
+ * - Blocks for 5 minutes after exceeding limit
+ */
+export const kapsoRateLimiter = createRateLimiter({
+  name: "kapso-webhook",
+  windowMs: 60000,        // 1 minute
+  maxRequests: 60,        // 60 requests per minute
+  blockDurationMs: 300000, // 5 minutes
+  keyGenerator: (request) => {
+    // Extract session ID or phone number from Kapso payload
+    const sessionId = (request.body as { sessionId?: string })?.sessionId;
+    const phoneNumber = (request.body as { phoneNumber?: string })?.phoneNumber;
+    return sessionId ? `session:${sessionId}` : phoneNumber ? `phone:${phoneNumber}` : defaultKeyGenerator(request);
+  }
+});

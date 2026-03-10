@@ -448,3 +448,31 @@ export function getTokenStoreBackend(): "convex" | "memory" {
   }
   return "memory";
 }
+
+/**
+ * Kapso.ai API base URL for WhatsApp integration.
+ */
+export const KAPSO_API_BASE_URL = "https://api.kapso.ai";
+
+/**
+ * Retrieves the Kapso.ai API key from the environment.
+ * Used for sending messages through Kapso WhatsApp integration.
+ * @returns The Kapso API key
+ * @throws Error if KAPSO_API_KEY is not set
+ */
+export function getKapsoApiKey(): string {
+  const apiKey = process.env.KAPSO_API_KEY?.trim();
+  if (!apiKey) {
+    throw new Error("KAPSO_API_KEY is required.");
+  }
+  return apiKey;
+}
+
+/**
+ * Retrieves the Kapso webhook secret token from the environment.
+ * Used to validate incoming webhook requests from Kapso.ai.
+ * @returns The Kapso webhook secret, or undefined if not configured
+ */
+export function getKapsoWebhookSecret(): string | undefined {
+  return process.env.KAPSO_WEBHOOK_SECRET?.trim() || undefined;
+}

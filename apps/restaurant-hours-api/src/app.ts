@@ -8,12 +8,15 @@ import helmet from "helmet";
 
 import { createCorsMiddleware } from "./middleware/cors.js";
 import { Logger } from "./utils/logger.js";
-import { createAdminRouter, type AdminRouteOptions } from "./routes/admin.js";
 import { createMessageRouter, type MessageRouteOptions } from "./routes/message.js";
 import {
   createTelegramWebhookRouter,
   type TelegramWebhookRouteOptions
 } from "./routes/telegram-webhook.js";
+import {
+  createKapsoWebhookRouter,
+  type KapsoWebhookRouteOptions
+} from "./routes/kapso-webhook.js";
 
 /**
  * Logger instance for application errors.
@@ -24,48 +27,6 @@ const logger = new Logger({ service: "app" });
  * PROD-2: Application startup timestamp for uptime tracking.
  */
 const appStartTime = Date.now();
-
-function resolveSkipAdminAuth(skipAuth: boolean | undefined): boolean {
-  if (typeof skipAuth === "boolean") {
-    return skipAuth;
-  }
-
-  return process.env.NODE_ENV !== "production";
-}
-
-function isLoopbackIp(ip: string | undefined): boolean {
-  if (!ip) {
-    return false;
-  }
-
-  const normalizedIp = ip.toLowerCase().replace(/^::ffff:/u, "");
-  return normalizedIp === "127.0.0.1" || normalizedIp === "::1";
-}
-
-function isLocalAdminHost(host: string | undefined): boolean {
-  if (!host) {
-    return false;
-  }
-
-  const normalizedHost = host.toLowerCase();
-  return (
-    normalizedHost === "localhost" ||
-    normalizedHost === "127.0.0.1" ||
-    normalizedHost === "::1" ||
-    normalizedHost === "[::1]"
-  );
-}
-
-function allowLocalAdminOnly(request: Request, response: Response, next: NextFunction): void {
-  if (isLoopbackIp(request.ip) && isLocalAdminHost(request.hostname)) {
-    next();
-    return;
-  }
-
-  response.status(403).json({
-    error: "Admin panel is only available from localhost."
-  });
-}
 
 /**
  * PROD-2: Health check response structure.
@@ -89,9 +50,9 @@ interface ReadinessCheckResponse {
 }
 
 export type AppOptions =
-  & AdminRouteOptions
   & MessageRouteOptions
-  & TelegramWebhookRouteOptions;
+  & TelegramWebhookRouteOptions
+  & KapsoWebhookRouteOptions;
 
 /**
  * Creates and configures the Express application with security middleware.
@@ -109,7 +70,6 @@ export type AppOptions =
  */
 export function createApp(options: AppOptions = {}) {
   const app = express();
-  const skipAuth = resolveSkipAdminAuth(options.skipAuth);
 
   // SEC-07: Helmet security headers
   app.use(helmet({
@@ -233,9 +193,9 @@ export function createApp(options: AppOptions = {}) {
   });
 
   // Route handlers
-  app.use("/admin", allowLocalAdminOnly, createAdminRouter({ ...options, skipAuth }));
   app.use("/message", createMessageRouter(options));
   app.use("/telegram/webhook", createTelegramWebhookRouter(options));
+  app.use("/kapso/webhook", createKapsoWebhookRouter(options));
 
   const jsonErrorHandler: ErrorRequestHandler = (error, _request, response, next) => {
     if (
